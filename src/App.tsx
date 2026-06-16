@@ -39,11 +39,27 @@ const FIRST_PLAY_KEY = 'neakidz.pwa2.firstPlayTracked'
 const KNOWN_DUAS_KEY = 'neakidz.pwa2.duas.known'
 const LOGO_FACE = '/nea_kidz_face_light_gold_transparent.png'
 
-type View = 'home' | 'duas' | 'search' | 'collection' | 'episode' | 'profile' | 'settings' | 'paywall' | 'auth' | 'success'
+type View =
+  | 'home'
+  | 'duas'
+  | 'search'
+  | 'collection'
+  | 'episode'
+  | 'profile'
+  | 'settings'
+  | 'paywall'
+  | 'auth'
+  | 'onboarding'
+  | 'success'
 type MainTab = 'home' | 'duas' | 'search'
 type AuthMode = 'login' | 'register'
 type Plan = 'monthly' | 'yearly'
 type DuaMemoryFilter = 'all' | 'known' | 'learning'
+type OnboardingValues = {
+  usageContext: string
+  listenerAgeGroup: string
+  listeningMoment: string
+}
 
 type Session = {
   token: string
@@ -65,6 +81,20 @@ type User = {
   subscription_status?: string
   willRenew?: boolean
   will_renew?: boolean
+  usage_context?: string
+  usageContext?: string
+  listener_age_group?: string
+  listenerAgeGroup?: string
+  listening_moment?: string
+  listeningMoment?: string
+  onboarding_completed_at?: string | null
+  onboardingCompletedAt?: string | null
+  onboarding_skipped_at?: string | null
+  onboardingSkippedAt?: string | null
+  onboarding_version?: number
+  onboardingVersion?: number
+  onboarding_required?: boolean
+  onboardingRequired?: boolean
 }
 
 type Episode = {
@@ -149,6 +179,14 @@ type ApiError = Error & {
   payload?: unknown
 }
 
+type PreferencesResponse = {
+  success?: boolean
+  user?: User
+  profile?: {
+    onboarding_required?: boolean
+  }
+}
+
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>
@@ -224,6 +262,38 @@ function isPremiumUser(user: User | null) {
   return Number.isNaN(expiresMs) ? Boolean(flag) : expiresMs > Date.now()
 }
 
+function needsOnboarding(user: User | null) {
+  if (!user) return false
+  const explicit = user.onboarding_required ?? user.onboardingRequired
+  if (explicit === true) return true
+  if (explicit === false) return false
+
+  const usage = user.usage_context ?? user.usageContext
+  const age = user.listener_age_group ?? user.listenerAgeGroup
+  const completed = user.onboarding_completed_at ?? user.onboardingCompletedAt
+  const skipped = user.onboarding_skipped_at ?? user.onboardingSkippedAt
+  const hasPreferenceSignals = usage !== undefined || age !== undefined || completed !== undefined || skipped !== undefined
+
+  return Boolean(hasPreferenceSignals && (usage || 'unknown') === 'unknown' && (age || 'unknown') === 'unknown' && !completed && !skipped)
+}
+
+function userWithCompletedOnboarding(user: User | null, values?: Partial<OnboardingValues>) {
+  if (!user) return user
+  return {
+    ...user,
+    usage_context: values?.usageContext ?? user.usage_context ?? user.usageContext ?? 'unknown',
+    usageContext: values?.usageContext ?? user.usageContext ?? user.usage_context ?? 'unknown',
+    listener_age_group: values?.listenerAgeGroup ?? user.listener_age_group ?? user.listenerAgeGroup ?? 'unknown',
+    listenerAgeGroup: values?.listenerAgeGroup ?? user.listenerAgeGroup ?? user.listener_age_group ?? 'unknown',
+    listening_moment: values?.listeningMoment ?? user.listening_moment ?? user.listeningMoment ?? 'unknown',
+    listeningMoment: values?.listeningMoment ?? user.listeningMoment ?? user.listening_moment ?? 'unknown',
+    onboarding_required: false,
+    onboardingRequired: false,
+    onboarding_completed_at: values ? new Date().toISOString() : user.onboarding_completed_at,
+    onboardingCompletedAt: values ? new Date().toISOString() : user.onboardingCompletedAt,
+  }
+}
+
 function providerLabel(provider?: string | null) {
   if (provider === 'stripe') return 'Stripe Web'
   if (provider === 'google' || provider === 'google_play') return 'Google Play'
@@ -243,12 +313,14 @@ function App() {
   const duaAudioRef = useRef<HTMLAudioElement | null>(null)
   const lastHistorySaveRef = useRef(0)
   const listened60Ref = useRef(false)
+  const onboardingStartedRef = useRef(false)
   const [session, setSession] = useState<Session | null>(() => loadStoredSession())
   const [user, setUser] = useState<User | null>(null)
   const [catalog, setCatalog] = useState<Catalog | null>(null)
   const [catalogError, setCatalogError] = useState('')
   const [loadingCatalog, setLoadingCatalog] = useState(true)
-  const [view, setView] = useState<View>(() => (window.location.pathname.includes('abonnement/succes') ? 'success' : 'home'))
+  const [checkingAccount, setCheckingAccount] = useState(Boolean(session?.token))
+  const [view, setView] = useState<View>(() => (window.location.pathname.includes('abonnement/succes') ? 'success' : session ? 'home' : 'auth'))
   const [authMode, setAuthMode] = useState<AuthMode>('login')
   const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(null)
   const [selectedEpisodeId, setSelectedEpisodeId] = useState<string | null>(null)
@@ -279,7 +351,13 @@ function App() {
   const logout = useCallback(() => {
     saveSession(null)
     setUser(null)
-    setView('home')
+    setCatalog(null)
+    setPlayer(null)
+    setDuaAudio(null)
+    onboardingStartedRef.current = false
+    audioRef.current?.pause()
+    duaAudioRef.current?.pause()
+    setView('auth')
     setToast('Session fermée.')
   }, [saveSession])
 
@@ -367,13 +445,19 @@ function App() {
   )
 
   const refreshMe = useCallback(async () => {
-    if (!session?.token) return
+    if (!session?.token) {
+      setCheckingAccount(false)
+      return
+    }
+    setCheckingAccount(true)
     try {
       const me = await apiFetch<User>('/auth/me')
       setUser(me)
     } catch (error) {
       const status = (error as ApiError).status
       if (status === 401) logout()
+    } finally {
+      setCheckingAccount(false)
     }
   }, [apiFetch, logout, session?.token])
 
@@ -381,7 +465,7 @@ function App() {
     setLoadingCatalog(true)
     setCatalogError('')
     try {
-      const data = await apiFetch<Catalog>('/catalog/seasons', {}, false)
+      const data = await apiFetch<Catalog>('/catalog/seasons')
       setCatalog(hydrateCatalog(data))
     } catch {
       setCatalogError('Catalogue indisponible. Réessayez dans un instant.')
@@ -394,7 +478,7 @@ function App() {
     setLoadingDuas(true)
     setDuasError('')
     try {
-      const data = await apiFetch<Dua[]>('/catalog/duas', {}, false)
+      const data = await apiFetch<Dua[]>('/catalog/duas')
       setDuas(data)
     } catch {
       setDuasError('Invocations indisponibles pour le moment.')
@@ -404,13 +488,44 @@ function App() {
   }, [apiFetch])
 
   useEffect(() => {
+    if (!session?.token) {
+      setLoadingCatalog(false)
+      setLoadingDuas(false)
+      setCheckingAccount(false)
+      return
+    }
     loadCatalog()
     loadDuas()
-  }, [loadCatalog, loadDuas])
+  }, [loadCatalog, loadDuas, session?.token])
 
   useEffect(() => {
     if (session?.token) refreshMe()
   }, [refreshMe, session?.token])
+
+  useEffect(() => {
+    if (!session?.token) {
+      if (view !== 'auth' && view !== 'success') {
+        setAuthMode('login')
+        setView('auth')
+      }
+      return
+    }
+    if (needsOnboarding(user) && view !== 'onboarding' && view !== 'auth' && view !== 'success') {
+      setView('onboarding')
+    }
+  }, [session?.token, user, view])
+
+  useEffect(() => {
+    if (view !== 'onboarding' || !session?.token || onboardingStartedRef.current) return
+    onboardingStartedRef.current = true
+    apiFetch(
+      '/auth/me/preferences/start',
+      {
+        method: 'POST',
+        body: JSON.stringify({ onboarding_version: 1, platform: 'pwa2' }),
+      },
+    ).catch(() => undefined)
+  }, [apiFetch, session?.token, view])
 
   useEffect(() => {
     if (!session?.token) return
@@ -441,7 +556,7 @@ function App() {
     const timer = window.setTimeout(async () => {
       setSearching(true)
       try {
-        const data = await apiFetch<SearchResult>(`/catalog/search?q=${encodeURIComponent(query.trim())}`, {}, false)
+        const data = await apiFetch<SearchResult>(`/catalog/search?q=${encodeURIComponent(query.trim())}`)
         setSearchResult(data)
       } catch {
         setSearchResult({ collections: [], episodes: [] })
@@ -487,10 +602,13 @@ function App() {
   )
 
   const premium = isPremiumUser(user)
+  const onboardingRequired = needsOnboarding(user)
+  const accountPending = Boolean(session?.token && checkingAccount && !user && view !== 'success')
   const featuredEpisode = player?.episode || allEpisodes.find((episode) => episode.isFree) || allEpisodes[0]
   const freeCollection = allCollections.find((collection) => collection.id === 'histoires_gratuites')
-  const showBottomNav = ['home', 'duas', 'search', 'collection', 'episode'].includes(view)
-  const showTopMiniPlayer = Boolean(player && view !== 'home' && view !== 'auth' && view !== 'success')
+  const lockedAuthView = view === 'auth' && !session?.token
+  const showBottomNav = Boolean(session?.token && !accountPending && !onboardingRequired && ['home', 'duas', 'search', 'collection', 'episode'].includes(view))
+  const showTopMiniPlayer = Boolean(player && view !== 'home' && view !== 'auth' && view !== 'onboarding' && view !== 'success')
 
   const openCollection = (collectionId: string) => {
     setSelectedCollectionId(collectionId)
@@ -537,7 +655,7 @@ function App() {
     setDuaAudio((current) => (current ? { ...current, playing: false } : null))
     setNetworkBusy(true)
     try {
-      const stream = await apiFetch<{ url: string; duration?: number }>(`/stream/${episode.id}`, {}, !episode.isFree)
+      const stream = await apiFetch<{ url: string; duration?: number }>(`/stream/${episode.id}`)
       const src = mediaUrl(stream.url)
       setPlayer({
         episode,
@@ -688,6 +806,55 @@ function App() {
     }
   }
 
+  const updatePreferences = async (payload: Record<string, unknown>) => {
+    const options = { method: 'PATCH', body: JSON.stringify(payload) }
+    try {
+      return await apiFetch<PreferencesResponse>('/auth/me/preferences', options)
+    } catch (error) {
+      const status = (error as ApiError).status
+      if (status !== 404 && status !== 405) throw error
+      return apiFetch<PreferencesResponse>('/me/preferences', options)
+    }
+  }
+
+  const completeOnboarding = async (values: OnboardingValues) => {
+    setNetworkBusy(true)
+    try {
+      const data = await updatePreferences({
+        usage_context: values.usageContext,
+        listener_age_group: values.listenerAgeGroup,
+        listening_moment: values.listeningMoment,
+        onboarding_version: 1,
+        platform: 'pwa2',
+      })
+      setUser(data.user || userWithCompletedOnboarding(user, values))
+      setView('home')
+      setToast('Espace d’écoute prêt.')
+    } catch (error) {
+      setToast((error as ApiError).message || 'Préférences indisponibles.')
+    } finally {
+      setNetworkBusy(false)
+    }
+  }
+
+  const skipOnboarding = async () => {
+    setNetworkBusy(true)
+    try {
+      const data = await updatePreferences({
+        skip_onboarding: true,
+        onboarding_version: 1,
+        platform: 'pwa2',
+      })
+      setUser(data.user || userWithCompletedOnboarding(user))
+      setView('home')
+      setToast('Vous pourrez compléter ces préférences plus tard.')
+    } catch (error) {
+      setToast((error as ApiError).message || 'Préférences indisponibles.')
+    } finally {
+      setNetworkBusy(false)
+    }
+  }
+
   const installPwa = async () => {
     if (!installPrompt) return
     await trackEvent('pwa_add_to_home_screen_intent')
@@ -760,8 +927,8 @@ function App() {
         <MiniPlayerTop player={player} onToggle={togglePlayback} onPrevious={() => playAdjacentEpisode(-1)} onNext={() => playAdjacentEpisode(1)} onClose={closePlayer} />
       ) : (
         <AppHeader
-          variant={view === 'home' || view === 'duas' || view === 'search' ? 'root' : 'detail'}
-          showRight={view !== 'profile' && view !== 'settings' && view !== 'auth' && view !== 'success'}
+          variant={lockedAuthView || view === 'onboarding' ? 'locked' : view === 'home' || view === 'duas' || view === 'search' ? 'root' : 'detail'}
+          showRight={view !== 'profile' && view !== 'settings' && view !== 'auth' && view !== 'onboarding' && view !== 'success'}
           onBack={() => setView('home')}
           onHome={() => setView('home')}
           onProfile={() => {
@@ -772,7 +939,8 @@ function App() {
       )}
 
       <section className="content-zone">
-        {view === 'home' && (
+        {accountPending && <LoadingState />}
+        {!accountPending && view === 'home' && (
           <HomeView
             catalog={catalog}
             loading={loadingCatalog}
@@ -792,7 +960,7 @@ function App() {
             onNext={() => playAdjacentEpisode(1)}
           />
         )}
-        {view === 'duas' && (
+        {!accountPending && view === 'duas' && (
           <DuasView
             duas={duas}
             loading={loadingDuas}
@@ -810,7 +978,7 @@ function App() {
             onKnown={toggleKnownDua}
           />
         )}
-        {view === 'collection' && selectedCollection && (
+        {!accountPending && view === 'collection' && selectedCollection && (
           <CollectionView
             collection={selectedCollection}
             premium={premium}
@@ -819,7 +987,7 @@ function App() {
             onPlay={playEpisode}
           />
         )}
-        {view === 'episode' && selectedEpisode && (
+        {!accountPending && view === 'episode' && selectedEpisode && (
           <EpisodeView
             episode={selectedEpisode}
             collection={allCollections.find((item) => item.id === selectedEpisode.collectionId)}
@@ -829,7 +997,7 @@ function App() {
             onPaywall={promptPaywall}
           />
         )}
-        {view === 'search' && (
+        {!accountPending && view === 'search' && (
           <SearchView
             query={query}
             searching={searching}
@@ -842,7 +1010,7 @@ function App() {
             onPlay={playEpisode}
           />
         )}
-        {view === 'profile' && (
+        {!accountPending && view === 'profile' && (
           <ProfileView
             user={user}
             premium={premium}
@@ -857,7 +1025,7 @@ function App() {
             onRefresh={refreshMe}
           />
         )}
-        {view === 'settings' && (
+        {!accountPending && view === 'settings' && (
           <SettingsView
             installable={Boolean(installPrompt)}
             busy={networkBusy}
@@ -870,7 +1038,7 @@ function App() {
             onProfile={() => setView(user ? 'profile' : 'auth')}
           />
         )}
-        {view === 'paywall' && (
+        {!accountPending && view === 'paywall' && (
           <PaywallView
             episode={paywallEpisode}
             selectedPlan={selectedPlan}
@@ -885,10 +1053,11 @@ function App() {
             }}
           />
         )}
-        {view === 'auth' && (
+        {!accountPending && view === 'auth' && (
           <AuthView
             mode={authMode}
             busy={networkBusy}
+            locked={lockedAuthView}
             onMode={setAuthMode}
             onBack={() => setView('home')}
             onSubmit={async (mode, values) => {
@@ -901,7 +1070,7 @@ function App() {
                 )
                 saveSession({ token: data.token, refreshToken: data.refreshToken })
                 setUser(data.user)
-                setView('home')
+                setView(needsOnboarding(data.user) ? 'onboarding' : 'home')
                 setToast(mode === 'login' ? 'Connexion réussie.' : 'Compte créé.')
               } catch (error) {
                 setToast((error as ApiError).message)
@@ -909,6 +1078,14 @@ function App() {
                 setNetworkBusy(false)
               }
             }}
+          />
+        )}
+        {!accountPending && view === 'onboarding' && (
+          <OnboardingView
+            user={user}
+            busy={networkBusy}
+            onComplete={completeOnboarding}
+            onSkip={skipOnboarding}
           />
         )}
         {view === 'success' && (
@@ -962,7 +1139,7 @@ function AppHeader({
   onProfile,
   onSettings,
 }: {
-  variant: 'root' | 'detail'
+  variant: 'root' | 'detail' | 'locked'
   showRight: boolean
   onBack: () => void
   onHome: () => void
@@ -971,10 +1148,14 @@ function AppHeader({
 }) {
   return (
     <header className="app-header">
-      <button className="header-icon" type="button" onClick={variant === 'root' ? onProfile : onBack} aria-label={variant === 'root' ? 'Profil' : 'Retour'}>
-        {variant === 'root' ? <UserCircle size={25} /> : <ArrowLeft size={24} />}
-      </button>
-      <button className="brand-lockup" type="button" onClick={onHome} aria-label="Accueil NEA KIDZ">
+      {variant === 'locked' ? (
+        <span className="header-icon-placeholder" />
+      ) : (
+        <button className="header-icon" type="button" onClick={variant === 'root' ? onProfile : onBack} aria-label={variant === 'root' ? 'Profil' : 'Retour'}>
+          {variant === 'root' ? <UserCircle size={25} /> : <ArrowLeft size={24} />}
+        </button>
+      )}
+      <button className="brand-lockup" type="button" onClick={variant === 'locked' ? undefined : onHome} aria-label="Accueil NEA KIDZ" aria-disabled={variant === 'locked'}>
         <span>NEA</span>
         <img src={LOGO_FACE} alt="" />
         <span>KIDZ</span>
@@ -1177,7 +1358,7 @@ function Rail({
               )}
             </button>
             <button className="story-title" type="button" onClick={() => onOpenEpisode(episode.id)}>
-              {episode.title}
+              <span>{episode.title}</span>
             </button>
             <div className="story-meta">
               <span>
@@ -1812,12 +1993,14 @@ function PaywallView({
 function AuthView({
   mode,
   busy,
+  locked,
   onMode,
   onBack,
   onSubmit,
 }: {
   mode: AuthMode
   busy: boolean
+  locked: boolean
   onMode: (mode: AuthMode) => void
   onBack: () => void
   onSubmit: (mode: AuthMode, values: Record<string, string>) => Promise<void>
@@ -1833,11 +2016,18 @@ function AuthView({
 
   return (
     <div className="screen">
-      <button className="back-button" type="button" onClick={onBack}>
-        <ArrowLeft size={18} />
-        Accueil
-      </button>
+      {!locked && (
+        <button className="back-button" type="button" onClick={onBack}>
+          <ArrowLeft size={18} />
+          Accueil
+        </button>
+      )}
       <section className="auth-panel">
+        <div className="auth-intro">
+          <Headphones size={30} />
+          <h1>{mode === 'login' ? 'Connectez-vous' : 'Créez votre espace'}</h1>
+          <p>Votre compte NEA KIDZ protège l’écoute, les favoris et les préférences de la famille.</p>
+        </div>
         <div className="segmented">
           <button className={mode === 'login' ? 'active' : ''} type="button" onClick={() => onMode('login')}>
             Connexion
@@ -1857,6 +2047,190 @@ function AuthView({
         </form>
       </section>
     </div>
+  )
+}
+
+type OnboardingOption = {
+  value: string
+  label: string
+  description: string
+  icon: ReactNode
+}
+
+function OnboardingView({
+  user,
+  busy,
+  onComplete,
+  onSkip,
+}: {
+  user: User | null
+  busy: boolean
+  onComplete: (values: OnboardingValues) => Promise<void>
+  onSkip: () => Promise<void>
+}) {
+  const knownValue = (value?: string) => (value && value !== 'unknown' ? value : '')
+  const [step, setStep] = useState(0)
+  const [usageContext, setUsageContext] = useState(() => knownValue(user?.usage_context ?? user?.usageContext))
+  const [listenerAgeGroup, setListenerAgeGroup] = useState(() => knownValue(user?.listener_age_group ?? user?.listenerAgeGroup))
+  const [listeningMoment, setListeningMoment] = useState(() => knownValue(user?.listening_moment ?? user?.listeningMoment))
+
+  const contextOptions: OnboardingOption[] = [
+    { value: 'children', label: 'Mes enfants', description: 'Des histoires adaptées à leur âge', icon: <Heart size={20} /> },
+    { value: 'family', label: 'En famille', description: 'Pour les trajets, le coucher et les moments ensemble', icon: <HandHeart size={20} /> },
+    { value: 'self', label: 'Moi-même', description: 'Pour apprendre et mieux transmettre', icon: <UserCircle size={20} /> },
+    { value: 'mixed', label: 'Un peu de tout', description: 'On variera les recommandations', icon: <Sparkles size={20} /> },
+  ]
+  const ageOptions: OnboardingOption[] = [
+    { value: '3_5', label: '3-5 ans', description: 'Des récits courts, doux et très imagés', icon: <Gift size={20} /> },
+    { value: '6_8', label: '6-8 ans', description: 'Des aventures simples à raconter ensuite', icon: <BookOpen size={20} /> },
+    { value: '9_12', label: '9-12 ans', description: 'Des histoires plus riches et inspirantes', icon: <BadgeCheck size={20} /> },
+    { value: 'teen', label: 'Adolescents', description: 'Des contenus pour réfléchir et transmettre', icon: <ShieldCheck size={20} /> },
+    { value: 'multiple', label: 'Plusieurs âges', description: 'Pour une famille avec plusieurs enfants', icon: <Headphones size={20} /> },
+  ]
+  const momentOptions: OnboardingOption[] = [
+    { value: 'bedtime', label: 'Avant de dormir', description: 'Pour un retour au calme', icon: <Clock3 size={20} /> },
+    { value: 'car', label: 'En voiture', description: 'Pour transformer les trajets en histoires', icon: <Headphones size={20} /> },
+    { value: 'quiet_time', label: 'Temps calme', description: 'Sans écran, à la maison', icon: <Heart size={20} /> },
+    { value: 'anytime', label: 'À tout moment', description: 'Un mélange équilibré selon l’envie', icon: <Sparkles size={20} /> },
+  ]
+
+  const selectedLabel = (options: OnboardingOption[], value: string) => options.find((option) => option.value === value)?.label || 'À tout moment'
+  const canContinue = step === 0 || step === 4 || (step === 1 && Boolean(usageContext)) || (step === 2 && Boolean(listenerAgeGroup)) || step === 3
+  const progress = `${Math.min(100, ((step + 1) / 5) * 100)}%`
+
+  const goNext = () => {
+    if (!canContinue || busy) return
+    if (step < 4) {
+      setStep(step + 1)
+      return
+    }
+    onComplete({
+      usageContext,
+      listenerAgeGroup,
+      listeningMoment: listeningMoment || 'anytime',
+    })
+  }
+
+  return (
+    <div className="screen onboarding-screen">
+      <div className="onboarding-topbar">
+        <button type="button" onClick={() => (step > 0 ? setStep(step - 1) : undefined)} disabled={busy || step === 0} aria-label="Retour">
+          <ArrowLeft size={18} />
+        </button>
+        <div className="onboarding-progress" aria-hidden="true">
+          <i style={{ width: progress }} />
+        </div>
+        {step > 0 && step < 4 ? (
+          <button className="skip-link" type="button" onClick={onSkip} disabled={busy}>
+            Passer
+          </button>
+        ) : (
+          <span className="skip-placeholder" />
+        )}
+      </div>
+
+      {step === 0 && (
+        <section className="onboarding-hero">
+          <div className="onboarding-mark">
+            <Headphones size={34} />
+          </div>
+          <span>Bienvenue</span>
+          <h1>Créons votre espace d’écoute NEA KIDZ</h1>
+          <p>Quelques réponses suffisent pour adapter les histoires aux enfants, aux moments de famille et à votre façon d’écouter.</p>
+        </section>
+      )}
+
+      {step === 1 && (
+        <OnboardingChoiceStep
+          eyebrow="1/3"
+          title="Qui va écouter les histoires ?"
+          subtitle="Nous adapterons les recommandations à votre façon d’écouter."
+          options={contextOptions}
+          selected={usageContext}
+          onSelect={setUsageContext}
+        />
+      )}
+
+      {step === 2 && (
+        <OnboardingChoiceStep
+          eyebrow="2/3"
+          title="Quel âge ont vos enfants ?"
+          subtitle="Cela aide NEA KIDZ à proposer les récits les plus adaptés."
+          options={ageOptions}
+          selected={listenerAgeGroup}
+          onSelect={setListenerAgeGroup}
+        />
+      )}
+
+      {step === 3 && (
+        <OnboardingChoiceStep
+          eyebrow="3/3"
+          title="Quand écoutez-vous le plus souvent ?"
+          subtitle="Cette réponse affine les recommandations sans vous enfermer."
+          options={momentOptions}
+          selected={listeningMoment}
+          onSelect={setListeningMoment}
+          optional
+        />
+      )}
+
+      {step === 4 && (
+        <section className="onboarding-summary">
+          <CheckCircle2 size={42} />
+          <h1>Votre espace est prêt</h1>
+          <div className="summary-list">
+            <span>{selectedLabel(contextOptions, usageContext)}</span>
+            <span>{selectedLabel(ageOptions, listenerAgeGroup)}</span>
+            <span>{selectedLabel(momentOptions, listeningMoment || 'anytime')}</span>
+          </div>
+          <p>Chaque histoire est une graine. NEA KIDZ utilisera ces réponses pour mieux organiser l’écoute.</p>
+        </section>
+      )}
+
+      <div className="onboarding-action">
+        <button className="primary-action full" type="button" onClick={goNext} disabled={busy || !canContinue}>
+          {busy ? <Loader2 size={18} /> : step === 4 ? <Headphones size={18} /> : <ChevronRight size={18} />}
+          {step === 0 ? 'Créer mon espace d’écoute' : step === 4 ? 'Découvrir mes histoires' : 'Continuer'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function OnboardingChoiceStep({
+  eyebrow,
+  title,
+  subtitle,
+  options,
+  selected,
+  optional = false,
+  onSelect,
+}: {
+  eyebrow: string
+  title: string
+  subtitle: string
+  options: OnboardingOption[]
+  selected: string
+  optional?: boolean
+  onSelect: (value: string) => void
+}) {
+  return (
+    <section className="onboarding-panel">
+      <span>{eyebrow}</span>
+      <h1>{title}</h1>
+      <p>{subtitle}</p>
+      <div className="onboarding-options">
+        {options.map((option) => (
+          <button className={selected === option.value ? 'selected' : ''} type="button" key={option.value} onClick={() => onSelect(option.value)}>
+            <i>{option.icon}</i>
+            <strong>{option.label}</strong>
+            <small>{option.description}</small>
+            {selected === option.value && <Check size={18} />}
+          </button>
+        ))}
+      </div>
+      {optional && <em>Optionnel : si vous ne choisissez rien, NEA KIDZ variera les moments.</em>}
+    </section>
   )
 }
 

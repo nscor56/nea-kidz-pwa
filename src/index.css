@@ -496,8 +496,10 @@ p {
 
 .story-title {
   width: 100%;
-  min-height: 42px;
-  padding: 10px 10px 0;
+  height: 58px;
+  display: block;
+  overflow: hidden;
+  padding: 10px 10px 8px;
   border: 1px solid rgba(159, 111, 20, 0.18);
   border-top: 0;
   border-radius: 0 0 18px 18px;
@@ -508,6 +510,13 @@ p {
   line-height: 1.1;
   font-weight: 700;
   box-shadow: 0 8px 16px rgba(159, 111, 20, 0.08);
+}
+
+.story-title span {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .story-meta {
@@ -1243,6 +1252,38 @@ p {
   margin-top: 16px;
 }
 
+.auth-intro {
+  display: grid;
+  place-items: center;
+  gap: 9px;
+  margin-bottom: 18px;
+  text-align: center;
+}
+
+.auth-intro svg {
+  width: 58px;
+  height: 58px;
+  padding: 14px;
+  border-radius: 20px;
+  background: rgba(159, 111, 20, 0.14);
+  color: var(--gold);
+}
+
+.auth-intro h1 {
+  color: var(--text);
+  font-size: 26px;
+  line-height: 1.08;
+  font-weight: 800;
+}
+
+.auth-intro p {
+  max-width: 310px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.45;
+  font-weight: 600;
+}
+
 .auth-panel input {
   width: 100%;
   height: 54px;
@@ -1257,6 +1298,227 @@ p {
 
 .segmented {
   grid-template-columns: 1fr 1fr;
+}
+
+.onboarding-screen {
+  min-height: calc(100dvh - 78px);
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 18px;
+  padding-bottom: 18px;
+}
+
+.onboarding-topbar {
+  display: grid;
+  grid-template-columns: 42px 1fr 62px;
+  align-items: center;
+  gap: 10px;
+}
+
+.onboarding-topbar button {
+  min-height: 38px;
+  border: 0;
+  background: transparent;
+  color: var(--gold);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.onboarding-topbar button:first-child {
+  width: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: rgba(159, 111, 20, 0.1);
+}
+
+.onboarding-topbar button:disabled {
+  opacity: 0.32;
+}
+
+.skip-link {
+  text-align: right;
+}
+
+.skip-placeholder {
+  width: 62px;
+}
+
+.onboarding-progress {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(200, 180, 128, 0.48);
+}
+
+.onboarding-progress i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--gold);
+}
+
+.onboarding-hero,
+.onboarding-panel,
+.onboarding-summary {
+  align-self: center;
+  width: 100%;
+}
+
+.onboarding-hero,
+.onboarding-summary {
+  display: grid;
+  place-items: center;
+  gap: 12px;
+  text-align: center;
+}
+
+.onboarding-mark {
+  width: 132px;
+  height: 132px;
+  display: grid;
+  place-items: center;
+  border-radius: 34px;
+  background:
+    radial-gradient(circle at 35% 25%, rgba(255, 248, 234, 0.95), rgba(245, 228, 154, 0.58)),
+    var(--surface);
+  color: var(--gold);
+  border: 1px solid rgba(159, 111, 20, 0.28);
+  box-shadow: var(--shadow-strong);
+}
+
+.onboarding-hero > span,
+.onboarding-panel > span {
+  color: var(--gold);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.onboarding-hero h1,
+.onboarding-panel h1,
+.onboarding-summary h1 {
+  max-width: 340px;
+  color: var(--text);
+  font-size: 30px;
+  line-height: 1.08;
+  font-weight: 800;
+  text-align: center;
+}
+
+.onboarding-hero p,
+.onboarding-panel p,
+.onboarding-summary p {
+  max-width: 340px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.48;
+  font-weight: 600;
+  text-align: center;
+}
+
+.onboarding-panel {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+}
+
+.onboarding-options {
+  width: 100%;
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.onboarding-options button {
+  position: relative;
+  min-height: 74px;
+  display: grid;
+  grid-template-columns: 44px 1fr 24px;
+  grid-template-rows: auto auto;
+  column-gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: 20px;
+  border: 1px solid rgba(159, 111, 20, 0.24);
+  background: rgba(255, 248, 234, 0.74);
+  color: var(--text);
+  text-align: left;
+  box-shadow: 0 7px 14px rgba(159, 111, 20, 0.08);
+}
+
+.onboarding-options button.selected {
+  border-color: rgba(159, 111, 20, 0.62);
+  background: rgba(245, 228, 154, 0.28);
+}
+
+.onboarding-options i {
+  grid-row: 1 / span 2;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 16px;
+  background: rgba(159, 111, 20, 0.13);
+  color: var(--gold);
+  font-style: normal;
+}
+
+.onboarding-options strong {
+  min-width: 0;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.15;
+  font-weight: 800;
+}
+
+.onboarding-options small {
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.3;
+  font-weight: 600;
+}
+
+.onboarding-options button > svg {
+  grid-row: 1 / span 2;
+  color: var(--gold);
+}
+
+.onboarding-panel em {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 700;
+  text-align: center;
+}
+
+.onboarding-summary > svg {
+  color: var(--green);
+}
+
+.summary-list {
+  width: 100%;
+  display: grid;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.summary-list span {
+  min-height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 16px;
+  border: 1px solid rgba(159, 111, 20, 0.22);
+  background: rgba(255, 248, 234, 0.72);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.onboarding-action {
+  position: sticky;
+  bottom: 12px;
 }
 
 .success-panel > svg {
