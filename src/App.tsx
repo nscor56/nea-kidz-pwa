@@ -196,6 +196,78 @@ type Catalog = {
   seasons: Season[]
 }
 
+type RawEpisode = Partial<Episode> & {
+  slug?: string
+  duration_seconds?: number | string
+  size_mb?: number | string
+  is_free?: boolean | number | string
+  coverPath?: string | null
+  cover_path?: string | null
+  cover_url?: string | null
+  hero_image_url?: string | null
+  collection_id?: string
+  collection_slug?: string
+  collection_name?: string
+  season_name?: string
+}
+
+type HomeStory = {
+  episodeId?: string
+  episode_id?: string
+  collectionId?: string
+  collection_id?: string
+  title?: string
+  subtitle?: string
+  durationSeconds?: number | string
+  duration_seconds?: number | string
+  progressSeconds?: number | string
+  progress_seconds?: number | string
+  isFree?: boolean | number | string
+  is_free?: boolean | number | string
+  isLocked?: boolean | number | string
+  is_locked?: boolean | number | string
+  coverUrl?: string | null
+  cover_url?: string | null
+  heroImageUrl?: string | null
+  hero_image_url?: string | null
+  streamUrlEndpoint?: string
+  stream_url_endpoint?: string
+  episode?: RawEpisode
+}
+
+type HomeCollection = {
+  collectionId?: string
+  collection_id?: string
+  title?: string
+  subtitle?: string
+  storyCount?: number | string
+  story_count?: number | string
+  coverUrl?: string | null
+  cover_url?: string | null
+  isPremiumOnly?: boolean | number | string
+  is_premium_only?: boolean | number | string
+}
+
+type HomeTonight = {
+  title?: string
+  message?: string
+  stories?: HomeStory[]
+}
+
+type HomeContent = {
+  continueListening?: HomeStory
+  collections?: HomeCollection[]
+  newStories?: HomeStory[]
+  topStories?: HomeStory[]
+  topCollections?: HomeCollection[]
+  tonight?: HomeTonight
+  seasons?: Season[]
+}
+
+type HomeResponse = HomeContent & {
+  home?: HomeContent
+}
+
 type Dua = {
   id: string
   title: string
@@ -363,6 +435,184 @@ function parseNullableBool(value: unknown) {
   return null
 }
 
+function textValue(value: unknown, fallback = '') {
+  if (value === null || value === undefined) return fallback
+  const text = String(value).trim()
+  return text || fallback
+}
+
+function numberValue(value: unknown, fallback = 0) {
+  if (value === null || value === undefined || value === '') return fallback
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : fallback
+}
+
+function boolValue(value: unknown, fallback = false) {
+  return parseNullableBool(value) ?? fallback
+}
+
+function unwrapHomeContent(payload: HomeResponse): HomeContent {
+  return payload.home || payload
+}
+
+function catalogFromHomeContent(homeContent: HomeContent): Catalog | null {
+  const seasons = homeContent.seasons || []
+  if (seasons.length === 0) return null
+  return {
+    totalSeasons: seasons.length,
+    totalEpisodes: seasons.reduce(
+      (count, season) => count + season.collections.reduce((seasonCount, collection) => seasonCount + collection.episodes.length, 0),
+      0,
+    ),
+    seasons,
+  }
+}
+
+function homeStoryEpisodeId(story: HomeStory) {
+  return textValue(story.episodeId ?? story.episode_id ?? story.episode?.id ?? story.episode?.slug)
+}
+
+function homeStoryCollectionId(story: HomeStory) {
+  return textValue(story.collectionId ?? story.collection_id ?? story.episode?.collectionId ?? story.episode?.collection_id ?? story.episode?.collection_slug)
+}
+
+function homeCollectionId(collection: HomeCollection) {
+  return textValue(collection.collectionId ?? collection.collection_id)
+}
+
+function isFreeStoriesCollection(collection: Collection) {
+  return collection.id === 'histoires_gratuites' || collection.seasonId === 'gratuit'
+}
+
+function findCollectionById(collectionId: string, collections: Collection[]) {
+  if (!collectionId) return undefined
+  return collections.find((collection) => collection.id === collectionId)
+}
+
+function findCollectionForHomeStory(story: HomeStory, collections: Collection[]) {
+  const collectionId = homeStoryCollectionId(story)
+  const direct = findCollectionById(collectionId, collections)
+  if (direct) return direct
+
+  const episodeId = homeStoryEpisodeId(story)
+  if (!episodeId) return undefined
+  return collections.find((collection) => collection.episodes.some((episode) => episode.id === episodeId))
+}
+
+function findEpisodeById(episodeId: string, collections: Collection[]) {
+  if (!episodeId) return undefined
+  for (const collection of collections) {
+    const episode = collection.episodes.find((item) => item.id === episodeId)
+    if (episode) {
+      return {
+        episode,
+        collection,
+      }
+    }
+  }
+  return undefined
+}
+
+function normalizeHomeEpisode(
+  raw: RawEpisode | undefined,
+  fallback: Partial<Episode> & { episodeId?: string; durationSeconds?: number | string } = {},
+): Episode | null {
+  const id = textValue(raw?.id ?? raw?.slug ?? fallback.id ?? fallback.episodeId)
+  const title = textValue(raw?.title ?? fallback.title)
+  if (!id || !title) return null
+
+  const collectionId = textValue(raw?.collectionId ?? raw?.collection_id ?? raw?.collection_slug ?? fallback.collectionId)
+  const coverUrl = textValue(raw?.coverUrl ?? raw?.cover_url ?? raw?.coverPath ?? raw?.cover_path ?? fallback.coverUrl)
+  const heroImageUrl = textValue(raw?.heroImageUrl ?? raw?.hero_image_url ?? fallback.heroImageUrl ?? coverUrl)
+
+  return {
+    id,
+    title,
+    number: numberValue(raw?.number ?? fallback.number, 0),
+    duration: numberValue(raw?.duration ?? raw?.duration_seconds ?? fallback.duration ?? fallback.durationSeconds, 0),
+    sizeMb: numberValue(raw?.sizeMb ?? raw?.size_mb ?? fallback.sizeMb, 0),
+    isFree: boolValue(raw?.isFree ?? raw?.is_free ?? fallback.isFree, false),
+    coverUrl,
+    heroImageUrl,
+    collectionId,
+    collectionName: textValue(raw?.collectionName ?? raw?.collection_name ?? fallback.collectionName),
+    seasonName: textValue(raw?.seasonName ?? raw?.season_name ?? fallback.seasonName),
+  }
+}
+
+function episodeFromHomeStory(story: HomeStory, collections: Collection[]) {
+  const episodeId = homeStoryEpisodeId(story)
+  const collectionId = homeStoryCollectionId(story)
+  const existing = findEpisodeById(episodeId, collections)
+  const collection = existing?.collection || findCollectionById(collectionId, collections)
+  const base = existing?.episode
+  const coverUrl = textValue(story.coverUrl ?? story.cover_url ?? base?.coverUrl ?? collection?.coverUrl)
+  const heroImageUrl = textValue(story.heroImageUrl ?? story.hero_image_url ?? base?.heroImageUrl ?? coverUrl)
+  const fallback = {
+    ...base,
+    episodeId,
+    id: episodeId || base?.id,
+    title: textValue(story.title ?? base?.title),
+    duration: numberValue(story.durationSeconds ?? story.duration_seconds ?? base?.duration, base?.duration || 0),
+    isFree: boolValue(story.isFree ?? story.is_free ?? base?.isFree, base?.isFree || false),
+    coverUrl,
+    heroImageUrl,
+    collectionId: collection?.id || collectionId || base?.collectionId,
+    collectionName: collection?.name || base?.collectionName || story.subtitle,
+    seasonName: collection?.seasonName || base?.seasonName,
+  }
+  return normalizeHomeEpisode(story.episode, fallback)
+}
+
+function collectionStoryEpisode(collection: Collection, rankedCollection?: HomeCollection) {
+  const firstEpisode = collection.episodes[0]
+  if (!firstEpisode) return null
+  const coverUrl = textValue(rankedCollection?.coverUrl ?? rankedCollection?.cover_url ?? firstEpisode.coverUrl ?? collection.coverUrl)
+  return {
+    ...firstEpisode,
+    title: textValue(rankedCollection?.title, collection.name),
+    duration: firstEpisode.duration,
+    isFree: firstEpisode.isFree,
+    coverUrl,
+    heroImageUrl: textValue(firstEpisode.heroImageUrl ?? coverUrl),
+    collectionId: collection.id,
+    collectionName: collection.name,
+    seasonName: collection.seasonName,
+  }
+}
+
+function topCollectionEpisodesFromHome(homeContent: HomeContent | null, collections: Collection[]) {
+  const selected: Episode[] = []
+  const selectedCollections = new Set<string>()
+
+  const addCollection = (collection: Collection | undefined, rankedCollection?: HomeCollection) => {
+    if (!collection || isFreeStoriesCollection(collection) || selectedCollections.has(collection.id)) return
+    const episode = collectionStoryEpisode(collection, rankedCollection)
+    if (!episode) return
+    selected.push(episode)
+    selectedCollections.add(collection.id)
+  }
+
+  for (const rankedCollection of homeContent?.topCollections || []) {
+    addCollection(findCollectionById(homeCollectionId(rankedCollection), collections), rankedCollection)
+  }
+
+  for (const story of homeContent?.topStories || []) {
+    addCollection(findCollectionForHomeStory(story, collections))
+  }
+
+  for (const collection of collections) {
+    addCollection(collection)
+    if (selected.length >= 7) break
+  }
+
+  return selected.slice(0, 7)
+}
+
+function continueEpisodeFromHome(homeContent: HomeContent | null, collections: Collection[]) {
+  return homeContent?.continueListening ? episodeFromHomeStory(homeContent.continueListening, collections) : null
+}
+
 function parseEntitlementDate(value: unknown) {
   if (value === null || value === undefined || value === '') return null
   if (typeof value === 'number') {
@@ -462,6 +712,7 @@ function App() {
   const [session, setSession] = useState<Session | null>(() => loadStoredSession())
   const [user, setUser] = useState<User | null>(null)
   const [catalog, setCatalog] = useState<Catalog | null>(null)
+  const [homeContent, setHomeContent] = useState<HomeContent | null>(null)
   const [catalogError, setCatalogError] = useState('')
   const [loadingCatalog, setLoadingCatalog] = useState(true)
   const [checkingAccount, setCheckingAccount] = useState(Boolean(session?.token))
@@ -510,6 +761,7 @@ function App() {
     saveSession(null)
     setUser(null)
     setCatalog(null)
+    setHomeContent(null)
     setPlayer(null)
     setDuaAudio(null)
     onboardingStartedRef.current = false
@@ -623,10 +875,25 @@ function App() {
     setLoadingCatalog(true)
     setCatalogError('')
     try {
-      const data = await apiFetch<Catalog>('/catalog/seasons')
-      setCatalog(hydrateCatalog(data))
-    } catch {
-      setCatalogError('Catalogue indisponible. Réessayez dans un instant.')
+      try {
+        const homePayload = await apiFetch<HomeResponse>('/user/home')
+        const nextHomeContent = unwrapHomeContent(homePayload)
+        setHomeContent(nextHomeContent)
+        const homeCatalog = catalogFromHomeContent(nextHomeContent)
+        if (homeCatalog) {
+          setCatalog(hydrateCatalog(homeCatalog))
+          return
+        }
+      } catch {
+        setHomeContent(null)
+      }
+
+      try {
+        const data = await apiFetch<Catalog>('/catalog/seasons')
+        setCatalog(hydrateCatalog(data))
+      } catch {
+        setCatalogError('Catalogue indisponible. Réessayez dans un instant.')
+      }
     } finally {
       setLoadingCatalog(false)
     }
@@ -647,6 +914,7 @@ function App() {
 
   useEffect(() => {
     if (!session?.token) {
+      setHomeContent(null)
       setLoadingCatalog(false)
       setLoadingDuas(false)
       setCheckingAccount(false)
@@ -777,8 +1045,13 @@ function App() {
   const premium = isPremiumUser(user)
   const onboardingRequired = needsOnboarding(user)
   const accountPending = Boolean(session?.token && checkingAccount && !user && view !== 'success')
-  const featuredEpisode = player?.episode || allEpisodes.find((episode) => episode.isFree) || allEpisodes[0]
   const freeCollection = allCollections.find((collection) => collection.id === 'histoires_gratuites')
+  const homeContinueEpisode = useMemo(() => continueEpisodeFromHome(homeContent, allCollections), [allCollections, homeContent])
+  const featuredEpisode =
+    player?.episode ||
+    (premium ? homeContinueEpisode : homeContinueEpisode?.isFree ? homeContinueEpisode : freeCollection?.episodes[0]) ||
+    allEpisodes.find((episode) => episode.isFree) ||
+    allEpisodes[0]
   const lockedAuthView = view === 'auth' && !session?.token
   const standaloneView = view === 'auth' || view === 'onboarding' || view === 'paywall' || view === 'success'
   const showBottomNav = Boolean(session?.token && !accountPending && !onboardingRequired && ['home', 'duas', 'search', 'collection', 'episode'].includes(view))
@@ -1117,6 +1390,7 @@ function App() {
         {!accountPending && view === 'home' && (
           <HomeView
             catalog={catalog}
+            homeContent={homeContent}
             loading={loadingCatalog}
             error={catalogError}
             premium={premium}
@@ -1370,6 +1644,7 @@ function AppHeader({
 
 function HomeView({
   catalog,
+  homeContent,
   loading,
   error,
   premium,
@@ -1387,6 +1662,7 @@ function HomeView({
   onNext,
 }: {
   catalog: Catalog | null
+  homeContent: HomeContent | null
   loading: boolean
   error: string
   premium: boolean
@@ -1408,18 +1684,7 @@ function HomeView({
   if (!catalog) return null
 
   const seasons = catalog.seasons.filter((season) => season.collections.length > 0)
-  const premiumCollections = allCollections.filter((collection) => collection.id !== 'histoires_gratuites')
-  const topStories = premiumCollections
-    .flatMap((collection) =>
-      collection.episodes.slice(0, 1).map((episode) => ({
-        ...episode,
-        collectionId: collection.id,
-        collectionName: collection.name,
-        coverUrl: episode.coverUrl || collection.coverUrl,
-        heroImageUrl: episode.heroImageUrl || episode.coverUrl || collection.coverUrl,
-      })),
-    )
-    .slice(0, 7)
+  const topStories = topCollectionEpisodesFromHome(homeContent, allCollections)
   const featuredCollection = allCollections.find((collection) => collection.id === featuredEpisode?.collectionId) || freeCollection
 
   return (
