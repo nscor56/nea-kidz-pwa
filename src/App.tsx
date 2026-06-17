@@ -55,6 +55,8 @@ const TEXT_SCALE_KEY = 'neakidz.pwa2.textScale'
 const LOGO_FACE = '/nea_kidz_face_light_gold_transparent.png'
 const LOGIN_LOGO = '/nea_kidz_login_logo_gold_dark_trimmed.png'
 const REMEMBERED_EMAIL_KEY = 'neakidz.pwa2.rememberedEmail'
+const AUDIO_UNLOCK_SRC =
+  'data:audio/wav;base64,UklGRiQFAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=='
 const PAYWALL_PREVIEW_ROWS = [
   [
     ['Adam', '/paywall_catalog/adam.webp'],
@@ -349,9 +351,33 @@ function apiUrl(path: string) {
 
 function mediaUrl(url?: string | null) {
   if (!url) return ''
+  if (url.startsWith('data:')) return url
   if (url.startsWith('http')) return url
   if (API_BASE === '/api') return `/api${url.startsWith('/') ? url : `/${url}`}`
   return `${PUBLIC_API_BASE}${url.startsWith('/') ? url : `/${url}`}`
+}
+
+async function primeAudioForGesture(audio: HTMLAudioElement) {
+  if (!audio.paused || audio.currentSrc || audio.getAttribute('src')) return
+  audio.muted = true
+  audio.loop = true
+  audio.src = AUDIO_UNLOCK_SRC
+  try {
+    await audio.play()
+  } catch {
+    // Some browsers still refuse the unlock; the visible play button remains usable.
+  }
+}
+
+function stopAudioPrime(audio: HTMLAudioElement) {
+  const isPrimeSource = audio.currentSrc === AUDIO_UNLOCK_SRC || audio.getAttribute('src') === AUDIO_UNLOCK_SRC
+  if (isPrimeSource) {
+    audio.pause()
+    audio.removeAttribute('src')
+    audio.load()
+  }
+  audio.muted = false
+  audio.loop = false
 }
 
 function loadStoredSession(): Session | null {
@@ -836,7 +862,7 @@ function App() {
                     ? 'android'
                     : 'desktop',
                 browserName: navigator.userAgent.includes('Safari') ? 'Safari' : undefined,
-                isPwa: window.matchMedia('(display-mode: standalone)').matches,
+                isPwa: window.matchMedia('(display-mode: standalone)').matches || window.matchMedia('(display-mode: fullscreen)').matches,
                 screenWidth: window.innerWidth,
                 screenHeight: window.innerHeight,
                 locale: navigator.language,
@@ -1098,6 +1124,26 @@ function App() {
       return
     }
 
+    const audio = audioRef.current
+    const hasLoadedCurrentEpisode =
+      player?.episode.id === episode.id &&
+      audio?.currentSrc &&
+      audio.currentSrc !== AUDIO_UNLOCK_SRC
+
+    if (hasLoadedCurrentEpisode) {
+      if (audio.paused) {
+        audio
+          .play()
+          .then(() => setPlayer((current) => (current?.episode.id === episode.id ? { ...current, playing: true } : current)))
+          .catch(() => setToast('Touchez à nouveau le bouton lecture.'))
+      } else {
+        audio.pause()
+        setPlayer((current) => (current?.episode.id === episode.id ? { ...current, playing: false } : current))
+      }
+      return
+    }
+
+    if (audio) await primeAudioForGesture(audio)
     duaAudioRef.current?.pause()
     setDuaAudio((current) => (current ? { ...current, playing: false } : null))
     setNetworkBusy(true)
@@ -1114,12 +1160,21 @@ function App() {
       })
       listened60Ref.current = false
       lastHistorySaveRef.current = 0
-      window.setTimeout(() => {
-        audioRef.current?.play().catch(() => {
-          setPlayer((current) => (current ? { ...current, playing: false } : current))
-          setToast('Touchez lecture pour démarrer l’audio.')
-        })
-      }, 0)
+      if (audio) {
+        audio.muted = false
+        audio.loop = false
+        if (audio.currentSrc !== src && audio.getAttribute('src') !== src) {
+          audio.src = src
+          audio.load()
+        }
+        audio.currentTime = 0
+        try {
+          await audio.play()
+        } catch {
+          setPlayer((current) => (current?.episode.id === episode.id ? { ...current, playing: false } : current))
+          setToast('Touchez à nouveau le bouton lecture.')
+        }
+      }
       if (!localStorage.getItem(FIRST_PLAY_KEY)) {
         localStorage.setItem(FIRST_PLAY_KEY, '1')
         trackEvent('first_play', { episode_id: episode.id, collection_id: collection?.id || episode.collectionId })
@@ -1137,6 +1192,7 @@ function App() {
         setToast('Audio indisponible pour le moment.')
         trackEvent('audio_error', { episode_id: episode.id, code: apiError.code || 'stream_failed' })
       }
+      if (audio) stopAudioPrime(audio)
     } finally {
       setNetworkBusy(false)
     }
@@ -1146,8 +1202,13 @@ function App() {
     const audio = audioRef.current
     if (!audio || !player) return
     if (audio.paused) {
-      audio.play()
-      setPlayer({ ...player, playing: true })
+      audio
+        .play()
+        .then(() => setPlayer({ ...player, playing: true }))
+        .catch(() => {
+          setPlayer({ ...player, playing: false })
+          setToast('Touchez à nouveau le bouton lecture.')
+        })
     } else {
       audio.pause()
       setPlayer({ ...player, playing: false })
@@ -1171,20 +1232,27 @@ function App() {
   const startDua = (dua: Dua, repeat = false) => {
     audioRef.current?.pause()
     setPlayer((current) => (current ? { ...current, playing: false } : null))
+    const src = mediaUrl(dua.audio_url_ar || `/stream/duas/${dua.id}/ar`)
     setDuaAudio({
       dua,
-      src: mediaUrl(dua.audio_url_ar || `/stream/duas/${dua.id}/ar`),
+      src,
       playing: true,
       repeat,
       progress: 0,
       duration: 0,
     })
-    window.setTimeout(() => {
-      duaAudioRef.current?.play().catch(() => {
-        setDuaAudio((current) => (current ? { ...current, playing: false } : current))
-        setToast('Touchez lecture pour démarrer l’invocation.')
-      })
-    }, 0)
+    const audio = duaAudioRef.current
+    if (!audio) return
+    if (audio.src !== src) {
+      audio.src = src
+      audio.load()
+    }
+    audio.loop = repeat
+    audio.currentTime = 0
+    audio.play().catch(() => {
+      setDuaAudio((current) => (current?.dua.id === dua.id ? { ...current, playing: false } : current))
+      setToast('Touchez à nouveau le bouton lecture.')
+    })
   }
 
   const toggleDuaPlayback = (dua: Dua, repeat = false) => {
@@ -1198,8 +1266,13 @@ function App() {
       audio.loop = repeat
     }
     if (audio.paused) {
-      audio.play()
-      setDuaAudio({ ...duaAudio, playing: true, repeat })
+      audio
+        .play()
+        .then(() => setDuaAudio({ ...duaAudio, playing: true, repeat }))
+        .catch(() => {
+          setDuaAudio({ ...duaAudio, playing: false, repeat })
+          setToast('Touchez à nouveau le bouton lecture.')
+        })
     } else {
       audio.pause()
       setDuaAudio({ ...duaAudio, playing: false, repeat })

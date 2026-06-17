@@ -1,10 +1,12 @@
 {
   "name": "NEA KIDZ",
   "short_name": "NEA KIDZ",
+  "id": "/",
   "description": "Histoires audio islamiques pour enfants, à écouter en famille.",
   "start_url": "/",
   "scope": "/",
-  "display": "standalone",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
   "orientation": "portrait",
   "background_color": "#EDE1C6",
   "theme_color": "#EDE1C6",

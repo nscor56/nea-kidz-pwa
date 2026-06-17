@@ -1,4 +1,4 @@
-const CACHE_NAME = 'neakidz-pwa2-v2-light-home'
+const CACHE_NAME = 'neakidz-pwa2-v3-player-fullscreen'
 const SHELL_URLS = ['/', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png', '/favicon.ico']
 const CACHEABLE_ORIGINS = ['https://api.neakidz.com']
 
