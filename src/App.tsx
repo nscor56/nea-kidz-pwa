@@ -9,10 +9,14 @@ import {
   Clock3,
   CreditCard,
   Crown,
+  Eye,
+  EyeOff,
   Gift,
   HandHeart,
   Headphones,
   Heart,
+  KeyRound,
+  Mail,
   Moon,
   Loader2,
   Lock,
@@ -31,9 +35,11 @@ import {
   SkipForward,
   Smartphone,
   Sparkles,
+  Star,
   Sun,
   Type,
   UserCircle,
+  UserRound,
   WifiOff,
   X,
 } from 'lucide-react'
@@ -47,6 +53,35 @@ const KNOWN_DUAS_KEY = 'neakidz.pwa2.duas.known'
 const THEME_MODE_KEY = 'neakidz.pwa2.themeMode'
 const TEXT_SCALE_KEY = 'neakidz.pwa2.textScale'
 const LOGO_FACE = '/nea_kidz_face_light_gold_transparent.png'
+const LOGIN_LOGO = '/nea_kidz_login_logo_gold_dark_trimmed.png'
+const REMEMBERED_EMAIL_KEY = 'neakidz.pwa2.rememberedEmail'
+const PAYWALL_PREVIEW_ROWS = [
+  [
+    ['Adam', '/paywall_catalog/adam.webp'],
+    ['Suleyman', '/paywall_catalog/suleyman.webp'],
+    ['Maryam', '/paywall_catalog/maryam.webp'],
+    ['Abu Bakr', '/paywall_catalog/abu_bakr.webp'],
+    ['Douas', '/paywall_catalog/douas.webp'],
+    ['Moussa', '/paywall_catalog/moussa.webp'],
+    ['Muhammad', '/paywall_catalog/muhammad_enfance.webp'],
+    ['Khadija', '/paywall_catalog/khadija.webp'],
+    ['Youssouf', '/paywall_catalog/youssouf.webp'],
+    ['Bilal', '/paywall_catalog/bilal.webp'],
+    ['Hajar', '/paywall_catalog/hajar.webp'],
+  ],
+  [
+    ['Ibrahim', '/paywall_catalog/ibrahim.webp'],
+    ['Muhammad', '/paywall_catalog/muhammad_enfance.webp'],
+    ['Khadija', '/paywall_catalog/khadija.webp'],
+    ['Youssouf', '/paywall_catalog/youssouf.webp'],
+    ['Omar', '/paywall_catalog/omar.webp'],
+    ['Suleyman', '/paywall_catalog/suleyman.webp'],
+    ['Maryam', '/paywall_catalog/maryam.webp'],
+    ['Abu Bakr', '/paywall_catalog/abu_bakr.webp'],
+    ['Douas', '/paywall_catalog/douas.webp'],
+    ['Les anges', '/paywall_catalog/anges.webp'],
+  ],
+] as const
 
 type View =
   | 'home'
@@ -670,8 +705,9 @@ function App() {
   const featuredEpisode = player?.episode || allEpisodes.find((episode) => episode.isFree) || allEpisodes[0]
   const freeCollection = allCollections.find((collection) => collection.id === 'histoires_gratuites')
   const lockedAuthView = view === 'auth' && !session?.token
+  const standaloneView = view === 'auth' || view === 'onboarding' || view === 'paywall' || view === 'success'
   const showBottomNav = Boolean(session?.token && !accountPending && !onboardingRequired && ['home', 'duas', 'search', 'collection', 'episode'].includes(view))
-  const showTopMiniPlayer = Boolean(player && view !== 'home' && view !== 'auth' && view !== 'onboarding' && view !== 'success')
+  const showTopMiniPlayer = Boolean(player && view !== 'home' && !standaloneView)
 
   const openCollection = (collectionId: string) => {
     setSelectedCollectionId(collectionId)
@@ -988,10 +1024,10 @@ function App() {
 
       {showTopMiniPlayer && player ? (
         <MiniPlayerTop player={player} onToggle={togglePlayback} onPrevious={() => playAdjacentEpisode(-1)} onNext={() => playAdjacentEpisode(1)} onClose={closePlayer} />
-      ) : (
+      ) : !standaloneView ? (
         <AppHeader
-          variant={lockedAuthView || view === 'onboarding' ? 'locked' : view === 'home' || view === 'duas' || view === 'search' ? 'root' : 'detail'}
-          showRight={view !== 'profile' && view !== 'settings' && view !== 'auth' && view !== 'onboarding' && view !== 'success'}
+          variant={view === 'home' || view === 'duas' || view === 'search' ? 'root' : 'detail'}
+          showRight={view !== 'profile' && view !== 'settings'}
           onBack={() => setView('home')}
           onHome={() => setView('home')}
           onProfile={() => {
@@ -999,7 +1035,7 @@ function App() {
           }}
           onSettings={() => setView('settings')}
         />
-      )}
+      ) : null}
 
       <section className="content-zone">
         {accountPending && <LoadingState />}
@@ -1114,6 +1150,7 @@ function App() {
             authenticated={Boolean(session?.token)}
             onSelectPlan={setSelectedPlan}
             onCheckout={checkout}
+            onRestore={openPortal}
             onBack={() => setView('home')}
             onAuth={() => {
               setAuthMode('register')
@@ -1128,6 +1165,23 @@ function App() {
             locked={lockedAuthView}
             onMode={setAuthMode}
             onBack={() => setView('home')}
+            onForgotPassword={async (email) => {
+              setNetworkBusy(true)
+              try {
+                await apiFetch('/auth/forgot-password', {
+                  method: 'POST',
+                  body: JSON.stringify({ email }),
+                }, false)
+                setToast('Email envoyé si le compte existe.')
+              } catch (error) {
+                const apiError = error as ApiError
+                setToast(apiError.status === 429
+                  ? 'Trop de tentatives. Réessayez dans 15 minutes.'
+                  : "Impossible d’envoyer l’email de réinitialisation.")
+              } finally {
+                setNetworkBusy(false)
+              }
+            }}
             onSubmit={async (mode, values) => {
               setNetworkBusy(true)
               try {
@@ -2147,6 +2201,7 @@ function PaywallView({
   authenticated,
   onSelectPlan,
   onCheckout,
+  onRestore,
   onBack,
   onAuth,
 }: {
@@ -2156,51 +2211,85 @@ function PaywallView({
   authenticated: boolean
   onSelectPlan: (plan: Plan) => void
   onCheckout: (plan: Plan) => void
+  onRestore: () => void
   onBack: () => void
   onAuth: () => void
 }) {
   const cta = selectedPlan === 'yearly' ? 'Essayer gratuitement 7 jours*' : 'Commencez pour 7,99 €/mois'
   return (
-    <div className="screen">
-      <button className="back-button" type="button" onClick={onBack}>
-        <ArrowLeft size={18} />
-        Accueil
-      </button>
-      <section className="paywall">
-        <span className="eyebrow">
-          <Crown size={15} />
-          NEA KIDZ Premium
-        </span>
+    <div className="screen paywall-screen">
+      <div className="paywall-topbar">
+        <button className="circle-back" type="button" onClick={onBack} aria-label="Retour">
+          <ArrowLeft size={21} />
+        </button>
+        <button className="restore-link" type="button" onClick={authenticated ? onRestore : onAuth}>
+          Restaurer
+        </button>
+      </div>
+      <section className="paywall" aria-label={episode ? `Abonnement premium pour ${episode.title}` : 'Abonnement premium NEA KIDZ'}>
         <h1>Toutes nos histoires pour toute la famille</h1>
-        <p>{episode?.title || '200+ récits à écouter, aimer et transmettre.'}</p>
+        <p>200+ récits à écouter, aimer et transmettre.</p>
+
+        <div className="paywall-preview-showcase" aria-hidden="true">
+          {PAYWALL_PREVIEW_ROWS.map((row, rowIndex) => (
+            <div className={rowIndex === 0 ? 'paywall-preview-rail' : 'paywall-preview-rail reverse'} key={rowIndex}>
+              {[0, 1].map((repeat) =>
+                row.map(([title, src]) => (
+                  <div className="paywall-preview-card" key={`${rowIndex}-${repeat}-${title}`}>
+                    <img src={src} alt="" />
+                    <span>{title}</span>
+                  </div>
+                )),
+              )}
+            </div>
+          ))}
+        </div>
 
         <div className="plan-stack">
           <button className={selectedPlan === 'yearly' ? 'plan selected' : 'plan'} type="button" onClick={() => onSelectPlan('yearly')}>
-            <span>Annuel</span>
-            <strong>49,99 €</strong>
             <em>-48%</em>
+            <span>Annuel</span>
+            <strong>49,99 €<small>/an</small></strong>
             <small>Économisez 46 €/an<br />7 jours offerts*</small>
+            <i aria-hidden="true">{selectedPlan === 'yearly' ? <CheckCircle2 size={23} /> : <span />}</i>
           </button>
           <button className={selectedPlan === 'monthly' ? 'plan selected' : 'plan'} type="button" onClick={() => onSelectPlan('monthly')}>
             <span>Mensuel</span>
-            <strong>7,99 €</strong>
+            <strong>7,99 €<small>/mois</small></strong>
             <small>Sans engagement</small>
+            <i aria-hidden="true">{selectedPlan === 'monthly' ? <CheckCircle2 size={23} /> : <span />}</i>
           </button>
+        </div>
+
+        <div className="paywall-review">
+          <div aria-hidden="true">
+            {Array.from({ length: 5 }).map((_, index) => (
+              <Star size={15} fill="currentColor" key={index} />
+            ))}
+          </div>
+          <strong>Mon fils me demande encore une histoire avant de dormir.</strong>
+          <small>Parent NEA KIDZ</small>
+        </div>
+
+        <div className="paywall-reassurance">
+          <ShieldCheck size={17} />
+          <span>Aucun paiement aujourd’hui<br />Payez après la période d’essai</span>
         </div>
 
         <button className="primary-action full" type="button" onClick={() => (authenticated ? onCheckout(selectedPlan) : onAuth())} disabled={busy}>
           {busy ? <Loader2 size={18} /> : <CreditCard size={18} />}
-          {authenticated ? cta : 'Créer mon compte'}
+          {cta}
         </button>
-        <div className="paywall-reassurance">
-          <ShieldCheck size={18} />
-          <span>Aucun paiement aujourd’hui<br />Payez après la période d’essai</span>
-        </div>
         <p className="legal-copy">
           {selectedPlan === 'yearly'
             ? '*: 7 jours offerts, puis 49.99€/an.\nPayez après la période d’essai.'
             : '7,99 €/mois, renouvellement automatique.\nAnnulable à tout moment.'}
         </p>
+        <div className="legal-links">
+          <a href="https://neakidz.com/cgv/" target="_blank" rel="noreferrer">Conditions</a>
+          <a href="https://neakidz.com/politique-de-confidentialite/" target="_blank" rel="noreferrer">Confidentialité</a>
+        </div>
+        {!authenticated && <p className="activation-note">Connexion demandée au moment de l’activation.</p>}
       </section>
     </div>
   )
@@ -2212,6 +2301,7 @@ function AuthView({
   locked,
   onMode,
   onBack,
+  onForgotPassword,
   onSubmit,
 }: {
   mode: AuthMode
@@ -2219,49 +2309,121 @@ function AuthView({
   locked: boolean
   onMode: (mode: AuthMode) => void
   onBack: () => void
+  onForgotPassword: (email: string) => Promise<void>
   onSubmit: (mode: AuthMode, values: Record<string, string>) => Promise<void>
 }) {
   const [name, setName] = useState('')
-  const [email, setEmail] = useState('')
+  const [email, setEmail] = useState(() => localStorage.getItem(REMEMBERED_EMAIL_KEY) || '')
   const [password, setPassword] = useState('')
+  const [passwordVisible, setPasswordVisible] = useState(false)
+  const [rememberMe, setRememberMe] = useState(true)
+  const [forgotOpen, setForgotOpen] = useState(false)
+  const [forgotEmail, setForgotEmail] = useState(() => localStorage.getItem(REMEMBERED_EMAIL_KEY) || '')
+  const isRegister = mode === 'register'
 
   const submit = (event: FormEvent) => {
     event.preventDefault()
-    onSubmit(mode, mode === 'register' ? { name, email, password } : { email, password })
+    if (!isRegister) {
+      if (rememberMe) localStorage.setItem(REMEMBERED_EMAIL_KEY, email.trim())
+      else localStorage.removeItem(REMEMBERED_EMAIL_KEY)
+    }
+    void onSubmit(mode, isRegister ? { name, email, password } : { email, password })
+  }
+
+  const openForgot = () => {
+    setForgotEmail(email.trim())
+    setForgotOpen(true)
+  }
+
+  const submitForgot = async (event: FormEvent) => {
+    event.preventDefault()
+    await onForgotPassword(forgotEmail.trim())
+    setForgotOpen(false)
   }
 
   return (
-    <div className="screen">
+    <div className="screen auth-screen">
       {!locked && (
         <button className="back-button" type="button" onClick={onBack}>
           <ArrowLeft size={18} />
           Accueil
         </button>
       )}
+      <div className="auth-brand">
+        <img src={LOGIN_LOGO} alt="" />
+        <strong>NEA KIDZ</strong>
+        <span>Chaque histoire est une graine</span>
+      </div>
       <section className="auth-panel">
         <div className="auth-intro">
-          <Headphones size={30} />
-          <h1>{mode === 'login' ? 'Connectez-vous' : 'Créez votre espace'}</h1>
-          <p>Votre compte NEA KIDZ protège l’écoute, les favoris et les préférences de la famille.</p>
-        </div>
-        <div className="segmented">
-          <button className={mode === 'login' ? 'active' : ''} type="button" onClick={() => onMode('login')}>
-            Connexion
-          </button>
-          <button className={mode === 'register' ? 'active' : ''} type="button" onClick={() => onMode('register')}>
-            Compte
-          </button>
+          <h1>{isRegister ? 'Créer un compte' : 'Connexion'}</h1>
+          {isRegister && <p>Rejoignez NEA KIDZ en quelques secondes.</p>}
         </div>
         <form onSubmit={submit}>
-          {mode === 'register' && <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Nom de famille" required />}
-          <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Email" type="email" required />
-          <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Mot de passe" type="password" minLength={8} required />
+          {isRegister && (
+            <label className="auth-field">
+              <UserRound size={19} />
+              <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Prénom" autoComplete="name" required />
+            </label>
+          )}
+          <label className="auth-field">
+            <Mail size={19} />
+            <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Email" type="email" autoComplete="email" required />
+          </label>
+          <label className="auth-field">
+            <KeyRound size={19} />
+            <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Mot de passe" type={passwordVisible ? 'text' : 'password'} minLength={8} autoComplete={isRegister ? 'new-password' : 'current-password'} required />
+            <button type="button" onClick={() => setPasswordVisible(!passwordVisible)} aria-label={passwordVisible ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}>
+              {passwordVisible ? <EyeOff size={19} /> : <Eye size={19} />}
+            </button>
+          </label>
+          {!isRegister && (
+            <label className="remember-row">
+              <input type="checkbox" checked={rememberMe} onChange={(event) => setRememberMe(event.target.checked)} />
+              <i aria-hidden="true" />
+              <span>Se souvenir de moi</span>
+            </label>
+          )}
           <button className="primary-action full" type="submit" disabled={busy}>
             {busy ? <Loader2 size={18} /> : <LogIn size={18} />}
-            {mode === 'login' ? 'Se connecter' : 'Créer le compte'}
+            {isRegister ? 'Créer un compte' : 'Se connecter'}
           </button>
+          {isRegister ? (
+            <button className="auth-text-link" type="button" onClick={() => onMode('login')}>
+              Déjà un compte ? Se connecter
+            </button>
+          ) : (
+            <>
+              <button className="auth-text-link muted" type="button" onClick={openForgot}>
+                Mot de passe oublié ?
+              </button>
+              <button className="auth-text-link" type="button" onClick={() => onMode('register')}>
+                S’inscrire
+              </button>
+              <small>Un compte est nécessaire pour accéder aux histoires.</small>
+            </>
+          )}
         </form>
       </section>
+      {forgotOpen && (
+        <div className="auth-dialog-backdrop" role="dialog" aria-modal="true" aria-labelledby="forgot-title">
+          <form className="auth-dialog" onSubmit={submitForgot}>
+            <h2 id="forgot-title">Mot de passe oublié</h2>
+            <p>Saisis ton email pour recevoir un lien de réinitialisation.</p>
+            <label className="auth-field">
+              <Mail size={19} />
+              <input value={forgotEmail} onChange={(event) => setForgotEmail(event.target.value)} placeholder="Email" type="email" autoComplete="email" required />
+            </label>
+            <div className="auth-dialog-actions">
+              <button className="ghost-action" type="button" onClick={() => setForgotOpen(false)} disabled={busy}>Annuler</button>
+              <button className="primary-action" type="submit" disabled={busy}>
+                {busy ? <Loader2 size={17} /> : null}
+                Envoyer
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   )
 }
