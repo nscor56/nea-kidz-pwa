@@ -1,6 +1,7 @@
 import {
   ArrowLeft,
   BadgeCheck,
+  Bell,
   BookOpen,
   Check,
   CheckCircle2,
@@ -12,12 +13,15 @@ import {
   HandHeart,
   Headphones,
   Heart,
+  Moon,
   Loader2,
   Lock,
   LogIn,
   LogOut,
+  Palette,
   Pause,
   Play,
+  Plus,
   RefreshCcw,
   Repeat2,
   Search,
@@ -25,7 +29,10 @@ import {
   ShieldCheck,
   SkipBack,
   SkipForward,
+  Smartphone,
   Sparkles,
+  Sun,
+  Type,
   UserCircle,
   WifiOff,
   X,
@@ -37,6 +44,8 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? '/a
 const SESSION_KEY = 'neakidz.pwa2.session'
 const FIRST_PLAY_KEY = 'neakidz.pwa2.firstPlayTracked'
 const KNOWN_DUAS_KEY = 'neakidz.pwa2.duas.known'
+const THEME_MODE_KEY = 'neakidz.pwa2.themeMode'
+const TEXT_SCALE_KEY = 'neakidz.pwa2.textScale'
 const LOGO_FACE = '/nea_kidz_face_light_gold_transparent.png'
 
 type View =
@@ -55,6 +64,8 @@ type MainTab = 'home' | 'duas' | 'search'
 type AuthMode = 'login' | 'register'
 type Plan = 'monthly' | 'yearly'
 type DuaMemoryFilter = 'all' | 'known' | 'learning'
+type ThemeMode = 'light' | 'dark' | 'system'
+type TextScale = 0.9 | 1 | 1.2
 type OnboardingValues = {
   usageContext: string
   listenerAgeGroup: string
@@ -240,6 +251,30 @@ function loadKnownDuas() {
   }
 }
 
+function loadThemeMode(): ThemeMode {
+  try {
+    const value = localStorage.getItem(THEME_MODE_KEY)
+    return value === 'dark' || value === 'system' ? value : 'light'
+  } catch {
+    return 'light'
+  }
+}
+
+function loadTextScale(): TextScale {
+  try {
+    const value = Number(localStorage.getItem(TEXT_SCALE_KEY))
+    if (Math.abs(value - 0.9) < 0.05) return 0.9
+    if (Math.abs(value - 1.2) < 0.05) return 1.2
+  } catch {
+    // Android defaults to the medium scale.
+  }
+  return 1
+}
+
+function resolveThemeMode(mode: ThemeMode, systemDark: boolean) {
+  return mode === 'system' ? (systemDark ? 'dark' : 'light') : mode
+}
+
 function durationLabel(seconds?: number) {
   const safe = Math.max(0, Math.floor(seconds || 0))
   const min = Math.floor(safe / 60)
@@ -341,11 +376,24 @@ function App() {
   const [paywallEpisode, setPaywallEpisode] = useState<Episode | null>(null)
   const [selectedPlan, setSelectedPlan] = useState<Plan>('yearly')
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null)
+  const [themeMode, setThemeModeState] = useState<ThemeMode>(() => loadThemeMode())
+  const [systemDark, setSystemDark] = useState(() => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false)
+  const [textScale, setTextScaleState] = useState<TextScale>(() => loadTextScale())
 
   const saveSession = useCallback((next: Session | null) => {
     setSession(next)
     if (next) localStorage.setItem(SESSION_KEY, JSON.stringify(next))
     else localStorage.removeItem(SESSION_KEY)
+  }, [])
+
+  const setThemeMode = useCallback((mode: ThemeMode) => {
+    setThemeModeState(mode)
+    localStorage.setItem(THEME_MODE_KEY, mode)
+  }, [])
+
+  const setTextScale = useCallback((scale: TextScale) => {
+    setTextScaleState(scale)
+    localStorage.setItem(TEXT_SCALE_KEY, String(scale))
   }, [])
 
   const logout = useCallback(() => {
@@ -501,6 +549,21 @@ function App() {
   useEffect(() => {
     if (session?.token) refreshMe()
   }, [refreshMe, session?.token])
+
+  useEffect(() => {
+    const query = window.matchMedia?.('(prefers-color-scheme: dark)')
+    if (!query) return undefined
+    const update = () => setSystemDark(query.matches)
+    update()
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  }, [])
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = resolveThemeMode(themeMode, systemDark)
+    document.documentElement.dataset.themeMode = themeMode
+    document.documentElement.dataset.textScale = String(textScale)
+  }, [systemDark, textScale, themeMode])
 
   useEffect(() => {
     if (!session?.token) {
@@ -1029,6 +1092,8 @@ function App() {
           <SettingsView
             installable={Boolean(installPrompt)}
             busy={networkBusy}
+            themeMode={themeMode}
+            textScale={textScale}
             onInstall={installPwa}
             onRefresh={() => {
               loadCatalog()
@@ -1036,6 +1101,8 @@ function App() {
               refreshMe()
             }}
             onProfile={() => setView(user ? 'profile' : 'auth')}
+            onThemeMode={setThemeMode}
+            onTextScale={setTextScale}
           />
         )}
         {!accountPending && view === 'paywall' && (
@@ -1212,7 +1279,17 @@ function HomeView({
 
   const seasons = catalog.seasons.filter((season) => season.collections.length > 0)
   const premiumCollections = allCollections.filter((collection) => collection.id !== 'histoires_gratuites')
-  const topCollections = premiumCollections.slice(0, 7)
+  const topStories = premiumCollections
+    .flatMap((collection) =>
+      collection.episodes.slice(0, 1).map((episode) => ({
+        ...episode,
+        collectionId: collection.id,
+        collectionName: collection.name,
+        coverUrl: episode.coverUrl || collection.coverUrl,
+        heroImageUrl: episode.heroImageUrl || episode.coverUrl || collection.coverUrl,
+      })),
+    )
+    .slice(0, 7)
   const featuredCollection = allCollections.find((collection) => collection.id === featuredEpisode?.collectionId) || freeCollection
 
   return (
@@ -1228,25 +1305,25 @@ function HomeView({
         />
       )}
 
-      <div className="playlist-row">
+      <section className="playlist-section">
         <SectionHeader title="Listes de lecture" />
-        <button type="button">
-          <Heart size={18} />
-          <span>
-            <strong>Favoris</strong>
-            <small>0 histoire</small>
-          </span>
-        </button>
-        <button type="button">
-          <Headphones size={18} />
-          <span>
-            <strong>Mes playlists</strong>
-            <small>Créer une liste</small>
-          </span>
-        </button>
-      </div>
+        <div className="playlist-strip">
+          <button className="playlist-shortcut" type="button">
+            <span className="playlist-icon">
+              <Heart size={21} />
+            </span>
+            <span>
+              <strong>Favoris</strong>
+              <small>0 histoire</small>
+            </span>
+          </button>
+          <button className="playlist-add" type="button" onClick={onPaywall} aria-label="Créer une liste de lecture">
+            <Plus size={31} />
+          </button>
+        </div>
+      </section>
 
-      {freeCollection && (
+      {!premium && freeCollection && (
         <Rail
           title="Histoires gratuites"
           label={`${freeCollection.episodes.length} épisodes`}
@@ -1257,13 +1334,13 @@ function HomeView({
         />
       )}
 
-      {topCollections.length > 0 && (
-        <CollectionRail
+      {topStories.length > 0 && (
+        <TopStoriesRail
           title="Les plus écoutées"
-          collections={topCollections}
+          episodes={topStories}
           premium={premium}
+          onOpenEpisode={onOpenEpisode}
           onOpenCollection={onOpenCollection}
-          onPaywall={onPaywall}
         />
       )}
 
@@ -1371,6 +1448,46 @@ function Rail({
             </div>
           </article>
         ))}
+      </div>
+    </section>
+  )
+}
+
+function TopStoriesRail({
+  title,
+  episodes,
+  premium,
+  onOpenEpisode,
+  onOpenCollection,
+}: {
+  title: string
+  episodes: Episode[]
+  premium: boolean
+  onOpenEpisode: (id: string) => void
+  onOpenCollection: (id: string) => void
+}) {
+  return (
+    <section className="top-stories-section">
+      <SectionHeader title={title} />
+      <div className="top-stories-shelf">
+        {episodes.map((episode, index) => {
+          const locked = !premium && !episode.isFree
+          const openTarget = () => (episode.collectionId ? onOpenCollection(episode.collectionId) : onOpenEpisode(episode.id))
+          return (
+            <article className="top-story-card" key={episode.id}>
+              <span className="top-story-rank">{index + 1}</span>
+              <button className="top-story-panel" type="button" onClick={openTarget}>
+                <span className="top-story-cover">
+                  <img src={mediaUrl(episode.coverUrl || episode.heroImageUrl)} alt="" />
+                  {locked && <span className="premium-badge">Premium</span>}
+                </span>
+                <span className="top-story-title">
+                  <span>{episode.title}</span>
+                </span>
+              </button>
+            </article>
+          )
+        })}
       </div>
     </section>
   )
@@ -1877,15 +1994,23 @@ function ProfileView({
 function SettingsView({
   installable,
   busy,
+  themeMode,
+  textScale,
   onInstall,
   onRefresh,
   onProfile,
+  onThemeMode,
+  onTextScale,
 }: {
   installable: boolean
   busy: boolean
+  themeMode: ThemeMode
+  textScale: TextScale
   onInstall: () => void
   onRefresh: () => void
   onProfile: () => void
+  onThemeMode: (mode: ThemeMode) => void
+  onTextScale: (scale: TextScale) => void
 }) {
   return (
     <div className="screen">
@@ -1920,7 +2045,76 @@ function SettingsView({
           </button>
         )}
       </div>
+      <AppearanceAccessibilityCard
+        themeMode={themeMode}
+        textScale={textScale}
+        onThemeMode={onThemeMode}
+        onTextScale={onTextScale}
+      />
     </div>
+  )
+}
+
+function AppearanceAccessibilityCard({
+  themeMode,
+  textScale,
+  onThemeMode,
+  onTextScale,
+}: {
+  themeMode: ThemeMode
+  textScale: TextScale
+  onThemeMode: (mode: ThemeMode) => void
+  onTextScale: (scale: TextScale) => void
+}) {
+  return (
+    <section className="appearance-card">
+      <SettingsCardTitle icon={<Type size={19} />} title="Accessibilité" />
+      <h2>Taille de police</h2>
+      <p>Appliquée instantanément et mémorisée sur cet appareil.</p>
+      <div className="settings-radio-list">
+        <SettingsRadioRow label="Petit" selected={textScale === 0.9} onSelect={() => onTextScale(0.9)} />
+        <SettingsRadioRow label="Moyen" selected={textScale === 1} onSelect={() => onTextScale(1)} />
+        <SettingsRadioRow label="Grand" selected={textScale === 1.2} onSelect={() => onTextScale(1.2)} />
+      </div>
+      <div className="settings-divider" />
+      <SettingsCardTitle icon={<Palette size={19} />} title="Apparence" />
+      <p>Le thème clair est appliqué par défaut. Le thème sombre reste disponible pour une écoute plus feutrée.</p>
+      <div className="settings-radio-list">
+        <SettingsRadioRow label="Clair" selected={themeMode === 'light'} onSelect={() => onThemeMode('light')} icon={<Sun size={17} />} />
+        <SettingsRadioRow label="Sombre" selected={themeMode === 'dark'} onSelect={() => onThemeMode('dark')} icon={<Moon size={17} />} />
+        <SettingsRadioRow label="Auto" selected={themeMode === 'system'} onSelect={() => onThemeMode('system')} icon={<Smartphone size={17} />} />
+      </div>
+    </section>
+  )
+}
+
+function SettingsCardTitle({ icon, title }: { icon: ReactNode; title: string }) {
+  return (
+    <div className="settings-card-title">
+      {icon}
+      <strong>{title}</strong>
+    </div>
+  )
+}
+
+function SettingsRadioRow({
+  label,
+  selected,
+  icon,
+  onSelect,
+}: {
+  label: string
+  selected: boolean
+  icon?: ReactNode
+  onSelect: () => void
+}) {
+  const className = ['settings-radio', selected ? 'selected' : '', icon ? 'has-icon' : ''].filter(Boolean).join(' ')
+  return (
+    <button className={className} type="button" onClick={onSelect}>
+      {icon}
+      <span>{label}</span>
+      <i aria-hidden="true">{selected && <Check size={14} />}</i>
+    </button>
   )
 }
 
@@ -2073,17 +2267,20 @@ function OnboardingView({
   const [usageContext, setUsageContext] = useState(() => knownValue(user?.usage_context ?? user?.usageContext))
   const [listenerAgeGroup, setListenerAgeGroup] = useState(() => knownValue(user?.listener_age_group ?? user?.listenerAgeGroup))
   const [listeningMoment, setListeningMoment] = useState(() => knownValue(user?.listening_moment ?? user?.listeningMoment))
+  const [notificationGranted, setNotificationGranted] = useState(() => typeof Notification !== 'undefined' && Notification.permission === 'granted')
+  const [notificationBusy, setNotificationBusy] = useState(false)
+  const [notificationHint, setNotificationHint] = useState('')
 
   const contextOptions: OnboardingOption[] = [
     { value: 'children', label: 'Mes enfants', description: 'Des histoires adaptées à leur âge', icon: <Heart size={20} /> },
-    { value: 'family', label: 'En famille', description: 'Pour les trajets, le coucher et les moments ensemble', icon: <HandHeart size={20} /> },
+    { value: 'family', label: 'En famille', description: 'Pour les trajets, le coucher ou les moments ensemble', icon: <HandHeart size={20} /> },
     { value: 'self', label: 'Moi-même', description: 'Pour apprendre et mieux transmettre', icon: <UserCircle size={20} /> },
     { value: 'mixed', label: 'Un peu de tout', description: 'On variera les recommandations', icon: <Sparkles size={20} /> },
   ]
   const ageOptions: OnboardingOption[] = [
-    { value: '3_5', label: '3-5 ans', description: 'Des récits courts, doux et très imagés', icon: <Gift size={20} /> },
-    { value: '6_8', label: '6-8 ans', description: 'Des aventures simples à raconter ensuite', icon: <BookOpen size={20} /> },
-    { value: '9_12', label: '9-12 ans', description: 'Des histoires plus riches et inspirantes', icon: <BadgeCheck size={20} /> },
+    { value: '3_5', label: '3–5 ans', description: 'Des récits courts, doux et très imagés', icon: <Gift size={20} /> },
+    { value: '6_8', label: '6–8 ans', description: 'Des aventures simples à raconter ensuite', icon: <BookOpen size={20} /> },
+    { value: '9_12', label: '9–12 ans', description: 'Des histoires plus riches et inspirantes', icon: <BadgeCheck size={20} /> },
     { value: 'teen', label: 'Adolescents', description: 'Des contenus pour réfléchir et transmettre', icon: <ShieldCheck size={20} /> },
     { value: 'multiple', label: 'Plusieurs âges', description: 'Pour une famille avec plusieurs enfants', icon: <Headphones size={20} /> },
   ]
@@ -2091,16 +2288,35 @@ function OnboardingView({
     { value: 'bedtime', label: 'Avant de dormir', description: 'Pour un retour au calme', icon: <Clock3 size={20} /> },
     { value: 'car', label: 'En voiture', description: 'Pour transformer les trajets en histoires', icon: <Headphones size={20} /> },
     { value: 'quiet_time', label: 'Temps calme', description: 'Sans écran, à la maison', icon: <Heart size={20} /> },
-    { value: 'anytime', label: 'À tout moment', description: 'Un mélange équilibré selon l’envie', icon: <Sparkles size={20} /> },
+    { value: 'anytime', label: 'À tout moment', description: 'On vous proposera un mélange équilibré', icon: <Sparkles size={20} /> },
   ]
 
-  const selectedLabel = (options: OnboardingOption[], value: string) => options.find((option) => option.value === value)?.label || 'À tout moment'
-  const canContinue = step === 0 || step === 4 || (step === 1 && Boolean(usageContext)) || (step === 2 && Boolean(listenerAgeGroup)) || step === 3
-  const progress = `${Math.min(100, ((step + 1) / 5) * 100)}%`
+  const selectedLabel = (options: OnboardingOption[], value: string) => options.find((option) => option.value === value)?.label || 'À affiner plus tard'
+  const isFinalStep = step === 5
+  const canContinue = step === 0 || step === 4 || isFinalStep || (step === 1 && Boolean(usageContext)) || (step === 2 && Boolean(listenerAgeGroup)) || step === 3
+  const progress = `${Math.min(100, ((step + 1) / 6) * 100)}%`
+  const ctaLabel = step === 0
+    ? 'Créer mon espace d’écoute'
+    : step === 4
+      ? 'Terminer'
+      : isFinalStep
+        ? 'Découvrir mes histoires'
+        : 'Continuer'
+  const microcopy = isFinalStep
+    ? 'Chaque histoire est une graine.'
+    : step === 1
+      ? 'Vous pourrez modifier vos réponses plus tard.'
+      : step === 2
+        ? 'Choisissez l’âge principal, ou plusieurs âges si besoin.'
+        : step === 3
+          ? 'Cette étape affine vos recommandations, sans vous enfermer.'
+          : step === 4
+            ? 'Vous pourrez modifier les rappels depuis votre profil.'
+            : ''
 
   const goNext = () => {
     if (!canContinue || busy) return
-    if (step < 4) {
+    if (step < 5) {
       setStep(step + 1)
       return
     }
@@ -2111,17 +2327,41 @@ function OnboardingView({
     })
   }
 
+  const activateNotifications = async () => {
+    if (typeof Notification === 'undefined') {
+      setNotificationHint('Les notifications ne sont pas disponibles dans ce navigateur.')
+      return
+    }
+    if (Notification.permission === 'granted') {
+      setNotificationGranted(true)
+      setNotificationHint('')
+      return
+    }
+    if (Notification.permission === 'denied') {
+      setNotificationHint('Autorisez NEA KIDZ dans les réglages du navigateur.')
+      return
+    }
+    setNotificationBusy(true)
+    try {
+      const permission = await Notification.requestPermission()
+      setNotificationGranted(permission === 'granted')
+      setNotificationHint(permission === 'granted' ? '' : 'Vous pourrez activer les rappels plus tard depuis votre profil.')
+    } finally {
+      setNotificationBusy(false)
+    }
+  }
+
   return (
     <div className="screen onboarding-screen">
       <div className="onboarding-topbar">
-        <button type="button" onClick={() => (step > 0 ? setStep(step - 1) : undefined)} disabled={busy || step === 0} aria-label="Retour">
+        <button type="button" onClick={() => (step > 0 ? setStep(step - 1) : undefined)} disabled={busy || notificationBusy || step === 0} aria-label="Retour">
           <ArrowLeft size={18} />
         </button>
         <div className="onboarding-progress" aria-hidden="true">
           <i style={{ width: progress }} />
         </div>
-        {step > 0 && step < 4 ? (
-          <button className="skip-link" type="button" onClick={onSkip} disabled={busy}>
+        {step > 0 && step < 5 ? (
+          <button className="skip-link" type="button" onClick={onSkip} disabled={busy || notificationBusy}>
             Passer
           </button>
         ) : (
@@ -2131,12 +2371,13 @@ function OnboardingView({
 
       {step === 0 && (
         <section className="onboarding-hero">
-          <div className="onboarding-mark">
-            <Headphones size={34} />
+          <div className="onboarding-image">
+            <img src="/onboarding_premium_listening_hero.png" alt="" />
+            <strong>Quand l’écran s’éteint,<br />l’imaginaire se rallume.</strong>
           </div>
-          <span>Bienvenue</span>
-          <h1>Créons votre espace d’écoute NEA KIDZ</h1>
-          <p>Quelques réponses suffisent pour adapter les histoires aux enfants, aux moments de famille et à votre façon d’écouter.</p>
+          <h1>Bienvenue dans NEA KIDZ</h1>
+          <h2>Des récits islamiques à écouter, aimer et transmettre.</h2>
+          <p>En quelques secondes, préparons un espace d’écoute adapté à votre famille.</p>
         </section>
       )}
 
@@ -2145,6 +2386,7 @@ function OnboardingView({
           eyebrow="1/3"
           title="Qui va écouter les histoires ?"
           subtitle="Nous adapterons les recommandations à votre façon d’écouter."
+          visualIcon={<HandHeart size={30} />}
           options={contextOptions}
           selected={usageContext}
           onSelect={setUsageContext}
@@ -2155,7 +2397,8 @@ function OnboardingView({
         <OnboardingChoiceStep
           eyebrow="2/3"
           title="Quel âge ont vos enfants ?"
-          subtitle="Cela aide NEA KIDZ à proposer les récits les plus adaptés."
+          subtitle="Cela nous aide à proposer les récits les plus adaptés."
+          visualIcon={<Gift size={30} />}
           options={ageOptions}
           selected={listenerAgeGroup}
           onSelect={setListenerAgeGroup}
@@ -2166,7 +2409,8 @@ function OnboardingView({
         <OnboardingChoiceStep
           eyebrow="3/3"
           title="Quand écoutez-vous le plus souvent ?"
-          subtitle="Cette réponse affine les recommandations sans vous enfermer."
+          subtitle="NEA KIDZ s’adapte aux moments naturels de votre famille."
+          visualIcon={<Headphones size={30} />}
           options={momentOptions}
           selected={listeningMoment}
           onSelect={setListeningMoment}
@@ -2175,23 +2419,38 @@ function OnboardingView({
       )}
 
       {step === 4 && (
+        <NotificationOnboardingStep
+          granted={notificationGranted}
+          busy={notificationBusy}
+          hint={notificationHint}
+          onActivate={activateNotifications}
+        />
+      )}
+
+      {step === 5 && (
         <section className="onboarding-summary">
-          <CheckCircle2 size={42} />
-          <h1>Votre espace est prêt</h1>
-          <div className="summary-list">
-            <span>{selectedLabel(contextOptions, usageContext)}</span>
-            <span>{selectedLabel(ageOptions, listenerAgeGroup)}</span>
-            <span>{selectedLabel(momentOptions, listeningMoment || 'anytime')}</span>
+          <div className="ready-visual">
+            <img src={LOGO_FACE} alt="" />
+            <BookOpen size={19} />
+            <Headphones size={19} />
           </div>
-          <p>Chaque histoire est une graine. NEA KIDZ utilisera ces réponses pour mieux organiser l’écoute.</p>
+          <h1>Votre espace est prêt</h1>
+          <p>Nous avons préparé des histoires adaptées à votre famille.</p>
+          <div className="preference-summary">
+            <SummaryRow icon={<HandHeart size={19} />} label="Écoute" value={selectedLabel(contextOptions, usageContext)} />
+            <SummaryRow icon={<Gift size={19} />} label="Âge" value={selectedLabel(ageOptions, listenerAgeGroup)} />
+            <SummaryRow icon={<Clock3 size={19} />} label="Moment" value={selectedLabel(momentOptions, listeningMoment)} />
+            <SummaryRow icon={<Bell size={19} />} label="Rappels" value={notificationGranted ? 'Activées' : 'À activer plus tard'} />
+          </div>
         </section>
       )}
 
       <div className="onboarding-action">
-        <button className="primary-action full" type="button" onClick={goNext} disabled={busy || !canContinue}>
-          {busy ? <Loader2 size={18} /> : step === 4 ? <Headphones size={18} /> : <ChevronRight size={18} />}
-          {step === 0 ? 'Créer mon espace d’écoute' : step === 4 ? 'Découvrir mes histoires' : 'Continuer'}
+        <button className="primary-action full" type="button" onClick={goNext} disabled={busy || notificationBusy || !canContinue}>
+          {busy ? <Loader2 size={18} /> : isFinalStep ? <Headphones size={18} /> : <ChevronRight size={18} />}
+          {ctaLabel}
         </button>
+        {microcopy && <small>{microcopy}</small>}
       </div>
     </div>
   )
@@ -2201,6 +2460,7 @@ function OnboardingChoiceStep({
   eyebrow,
   title,
   subtitle,
+  visualIcon,
   options,
   selected,
   optional = false,
@@ -2209,6 +2469,7 @@ function OnboardingChoiceStep({
   eyebrow: string
   title: string
   subtitle: string
+  visualIcon: ReactNode
   options: OnboardingOption[]
   selected: string
   optional?: boolean
@@ -2216,6 +2477,10 @@ function OnboardingChoiceStep({
 }) {
   return (
     <section className="onboarding-panel">
+      <div className="compact-listening-visual">
+        <span>{visualIcon}</span>
+        <strong>Un espace d’écoute qui s’adapte à votre foyer.</strong>
+      </div>
       <span>{eyebrow}</span>
       <h1>{title}</h1>
       <p>{subtitle}</p>
@@ -2231,6 +2496,55 @@ function OnboardingChoiceStep({
       </div>
       {optional && <em>Optionnel : si vous ne choisissez rien, NEA KIDZ variera les moments.</em>}
     </section>
+  )
+}
+
+function NotificationOnboardingStep({
+  granted,
+  busy,
+  hint,
+  onActivate,
+}: {
+  granted: boolean
+  busy: boolean
+  hint: string
+  onActivate: () => void
+}) {
+  const permission = typeof Notification !== 'undefined' ? Notification.permission : 'default'
+  return (
+    <section className="onboarding-panel notification-step">
+      <div className={granted ? 'bell-visual active' : 'bell-visual'}>
+        <Bell size={46} />
+      </div>
+      <span>4/4</span>
+      <h1>Souhaitez-vous recevoir les rappels NEA KIDZ ?</h1>
+      <p>Nous vous préviendrons pour les nouvelles histoires et les moments d’écoute choisis.</p>
+      <button className={granted ? 'notification-card granted' : 'notification-card'} type="button" onClick={onActivate} disabled={busy || granted}>
+        <i>{busy ? <Loader2 size={22} /> : granted ? <Check size={27} /> : <Bell size={27} />}</i>
+        <span>
+          <strong>{granted ? 'Notifications activées' : permission === 'denied' ? 'Ouvrir les réglages du navigateur' : 'Activer les notifications'}</strong>
+          <small>
+            {granted
+              ? 'Votre téléphone recevra les rappels NEA KIDZ.'
+              : permission === 'denied'
+                ? 'Autorisez NEA KIDZ dans les réglages du navigateur.'
+                : 'Une demande du navigateur va s’ouvrir sur cet appareil.'}
+          </small>
+        </span>
+        {granted ? <CheckCircle2 size={26} /> : <ChevronRight size={26} />}
+      </button>
+      {hint && <em>{hint}</em>}
+    </section>
+  )
+}
+
+function SummaryRow({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
+  return (
+    <div className="summary-row">
+      <i>{icon}</i>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
   )
 }
 
