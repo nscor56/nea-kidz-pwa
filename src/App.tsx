@@ -1101,6 +1101,7 @@ function App() {
               refreshMe()
             }}
             onProfile={() => setView(user ? 'profile' : 'auth')}
+            onPreferences={() => setView('onboarding')}
             onThemeMode={setThemeMode}
             onTextScale={setTextScale}
           />
@@ -1326,10 +1327,8 @@ function HomeView({
       {!premium && freeCollection && (
         <Rail
           title="Histoires gratuites"
-          label={`${freeCollection.episodes.length} épisodes`}
           episodes={freeCollection.episodes}
           premium={premium}
-          onOpenEpisode={onOpenEpisode}
           onPlay={(episode) => onPlay(episode, freeCollection)}
         />
       )}
@@ -1383,22 +1382,22 @@ function AudioHeroCard({
       <img src={mediaUrl(episode.heroImageUrl || episode.coverUrl || collection?.coverUrl)} alt="" />
       <div className="audio-hero-overlay">
         <div>
-          <span>{collection?.name || episode.collectionName || 'Histoires'}</span>
           <h1>{episode.title}</h1>
+          <span>{collection?.name || episode.collectionName || 'Histoires'}</span>
         </div>
         <div className="audio-controls">
-          <button type="button" onClick={onPrevious} aria-label="Précédent">
-            <SkipBack size={18} />
-          </button>
           <button className="play-main" type="button" onClick={onPlay} aria-label={isCurrent && player?.playing ? 'Pause' : 'Lecture'}>
             {isCurrent && player?.playing ? <Pause size={25} /> : <Play size={25} />}
+          </button>
+          <button type="button" onClick={onPrevious} aria-label="Précédent">
+            <SkipBack size={18} />
           </button>
           <button type="button" onClick={onNext} aria-label="Suivant">
             <SkipForward size={18} />
           </button>
-        </div>
-        <div className="hero-progress" aria-hidden="true">
-          <i style={{ width: `${percent}%` }} />
+          <div className="hero-progress" aria-hidden="true">
+            <i style={{ width: `${percent}%` }} />
+          </div>
         </div>
       </div>
     </section>
@@ -1407,45 +1406,39 @@ function AudioHeroCard({
 
 function Rail({
   title,
-  label,
   episodes,
   premium,
-  onOpenEpisode,
   onPlay,
 }: {
   title: string
-  label: string
   episodes: Episode[]
   premium: boolean
-  onOpenEpisode: (id: string) => void
   onPlay: (episode: Episode) => void
 }) {
   return (
     <section className="rail-section">
-      <SectionHeader title={title} label={label} />
+      <SectionHeader title={title} />
       <div className="episode-rail">
         {episodes.map((episode) => (
           <article className="story-card" key={episode.id}>
-            <button className="story-art" type="button" onClick={() => onOpenEpisode(episode.id)}>
+            <button className="story-art" type="button" onClick={() => onPlay(episode)}>
               <img src={mediaUrl(episode.coverUrl || episode.heroImageUrl)} alt="" />
               {!episode.isFree && !premium && (
                 <span className="lock-badge">
                   <Lock size={13} />
                 </span>
               )}
+              <span className="story-play-overlay" aria-hidden="true">
+                <Play size={17} />
+              </span>
             </button>
-            <button className="story-title" type="button" onClick={() => onOpenEpisode(episode.id)}>
+            <button className="story-title" type="button" onClick={() => onPlay(episode)}>
               <span>{episode.title}</span>
-            </button>
-            <div className="story-meta">
-              <span>
+              <small>
                 <Clock3 size={12} />
                 {durationLabel(episode.duration)}
-              </span>
-              <button className="tiny-play" type="button" onClick={() => onPlay(episode)} aria-label={`Écouter ${episode.title}`}>
-                <Play size={15} />
-              </button>
-            </div>
+              </small>
+            </button>
           </article>
         ))}
       </div>
@@ -1999,6 +1992,7 @@ function SettingsView({
   onInstall,
   onRefresh,
   onProfile,
+  onPreferences,
   onThemeMode,
   onTextScale,
 }: {
@@ -2009,6 +2003,7 @@ function SettingsView({
   onInstall: () => void
   onRefresh: () => void
   onProfile: () => void
+  onPreferences: () => void
   onThemeMode: (mode: ThemeMode) => void
   onTextScale: (scale: TextScale) => void
 }) {
@@ -2017,41 +2012,68 @@ function SettingsView({
       <section className="settings-title">
         <h1>Réglages</h1>
       </section>
-      <div className="settings-list">
-        <button className="settings-row action-row" type="button" onClick={onProfile}>
-          <UserCircle size={20} />
-          <div>
-            <strong>Compte</strong>
-            <span>Profil et abonnement</span>
-          </div>
-          <ChevronRight size={18} />
-        </button>
-        <button className="settings-row action-row" type="button" onClick={onRefresh} disabled={busy}>
-          <RefreshCcw size={20} />
-          <div>
-            <strong>Actualiser</strong>
-            <span>Catalogue et invocations</span>
-          </div>
-          <ChevronRight size={18} />
-        </button>
-        {installable && (
-          <button className="settings-row action-row" type="button" onClick={onInstall}>
-            <Sparkles size={20} />
+      <SettingsSection title="Compte">
+        <div className="settings-list">
+          <button className="settings-row action-row" type="button" onClick={onProfile}>
+            <UserCircle size={20} />
             <div>
-              <strong>Installer l’app</strong>
-              <span>Ajouter à l’écran d’accueil</span>
+              <strong>Profil</strong>
+              <span>Compte et abonnement</span>
             </div>
             <ChevronRight size={18} />
           </button>
-        )}
-      </div>
-      <AppearanceAccessibilityCard
-        themeMode={themeMode}
-        textScale={textScale}
-        onThemeMode={onThemeMode}
-        onTextScale={onTextScale}
-      />
+        </div>
+      </SettingsSection>
+      <SettingsSection title="Écoute">
+        <div className="settings-list">
+          <button className="settings-row action-row" type="button" onClick={onRefresh} disabled={busy}>
+            <RefreshCcw size={20} />
+            <div>
+              <strong>Actualiser</strong>
+              <span>Catalogue et invocations</span>
+            </div>
+            <ChevronRight size={18} />
+          </button>
+          {installable && (
+            <button className="settings-row action-row" type="button" onClick={onInstall}>
+              <Sparkles size={20} />
+              <div>
+                <strong>Installer l’app</strong>
+                <span>Ajouter à l’écran d’accueil</span>
+              </div>
+              <ChevronRight size={18} />
+            </button>
+          )}
+        </div>
+      </SettingsSection>
+      <SettingsSection title="Expérience">
+        <div className="settings-list">
+          <button className="settings-row action-row" type="button" onClick={onPreferences}>
+            <Settings size={20} />
+            <div>
+              <strong>Préférences d’écoute</strong>
+              <span>Adapter NEA KIDZ à votre famille</span>
+            </div>
+            <ChevronRight size={18} />
+          </button>
+        </div>
+        <AppearanceAccessibilityCard
+          themeMode={themeMode}
+          textScale={textScale}
+          onThemeMode={onThemeMode}
+          onTextScale={onTextScale}
+        />
+      </SettingsSection>
     </div>
+  )
+}
+
+function SettingsSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="settings-section">
+      <h2>{title}</h2>
+      {children}
+    </section>
   )
 }
 
