@@ -5,6 +5,7 @@ import {
   BookOpen,
   Check,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   Clock3,
   CreditCard,
@@ -15,7 +16,9 @@ import {
   HandHeart,
   Headphones,
   Heart,
+  Info,
   KeyRound,
+  ListMusic,
   Mail,
   Moon,
   Loader2,
@@ -28,6 +31,8 @@ import {
   Plus,
   RefreshCcw,
   Repeat2,
+  RotateCcw,
+  RotateCw,
   Search,
   Settings,
   ShieldCheck,
@@ -37,6 +42,7 @@ import {
   Sparkles,
   Star,
   Sun,
+  Timer,
   Type,
   UserCircle,
   UserRound,
@@ -91,6 +97,7 @@ type View =
   | 'search'
   | 'collection'
   | 'episode'
+  | 'player'
   | 'profile'
   | 'settings'
   | 'paywall'
@@ -296,6 +303,15 @@ type PlayerState = {
   playing: boolean
   progress: number
   duration: number
+}
+
+type EpisodeStream = {
+  src: string
+  duration: number
+}
+
+type PlayEpisodeOptions = {
+  toggleCurrent?: boolean
 }
 
 type DuaAudioState = {
@@ -732,6 +748,8 @@ function activeTabFor(view: View): MainTab {
 function App() {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const duaAudioRef = useRef<HTMLAudioElement | null>(null)
+  const streamCacheRef = useRef<Map<string, EpisodeStream>>(new Map())
+  const streamRequestRef = useRef<Map<string, Promise<EpisodeStream>>>(new Map())
   const lastHistorySaveRef = useRef(0)
   const listened60Ref = useRef(false)
   const onboardingStartedRef = useRef(false)
@@ -750,6 +768,7 @@ function App() {
   const [searchResult, setSearchResult] = useState<SearchResult>({ collections: [], episodes: [] })
   const [searching, setSearching] = useState(false)
   const [player, setPlayer] = useState<PlayerState | null>(null)
+  const [playerTargetEpisodeId, setPlayerTargetEpisodeId] = useState<string | null>(null)
   const [duas, setDuas] = useState<Dua[]>([])
   const [duasError, setDuasError] = useState('')
   const [loadingDuas, setLoadingDuas] = useState(false)
@@ -789,6 +808,9 @@ function App() {
     setCatalog(null)
     setHomeContent(null)
     setPlayer(null)
+    setPlayerTargetEpisodeId(null)
+    streamCacheRef.current.clear()
+    streamRequestRef.current.clear()
     setDuaAudio(null)
     onboardingStartedRef.current = false
     audioRef.current?.pause()
@@ -938,6 +960,33 @@ function App() {
     }
   }, [apiFetch])
 
+  const loadEpisodeStream = useCallback(
+    async (episode: Episode): Promise<EpisodeStream> => {
+      const cached = streamCacheRef.current.get(episode.id)
+      if (cached) return cached
+
+      const pending = streamRequestRef.current.get(episode.id)
+      if (pending) return pending
+
+      const request = apiFetch<{ url: string; duration?: number }>(`/stream/${episode.id}`)
+        .then((stream) => {
+          const next = {
+            src: mediaUrl(stream.url),
+            duration: stream.duration || episode.duration || 0,
+          }
+          streamCacheRef.current.set(episode.id, next)
+          return next
+        })
+        .finally(() => {
+          streamRequestRef.current.delete(episode.id)
+        })
+
+      streamRequestRef.current.set(episode.id, request)
+      return request
+    },
+    [apiFetch],
+  )
+
   useEffect(() => {
     if (!session?.token) {
       setHomeContent(null)
@@ -1078,10 +1127,54 @@ function App() {
     (premium ? homeContinueEpisode : homeContinueEpisode?.isFree ? homeContinueEpisode : freeCollection?.episodes[0]) ||
     allEpisodes.find((episode) => episode.isFree) ||
     allEpisodes[0]
+  const fullPlayerEpisode = useMemo(
+    () => player?.episode || allEpisodes.find((episode) => episode.id === playerTargetEpisodeId) || selectedEpisode || featuredEpisode || null,
+    [allEpisodes, featuredEpisode, player?.episode, playerTargetEpisodeId, selectedEpisode],
+  )
+  const fullPlayerCollection = useMemo(() => {
+    const collectionId = fullPlayerEpisode?.collectionId || player?.collection?.id || selectedCollectionId
+    return player?.collection || allCollections.find((collection) => collection.id === collectionId) || selectedCollection
+  }, [allCollections, fullPlayerEpisode?.collectionId, player?.collection, selectedCollection, selectedCollectionId])
   const lockedAuthView = view === 'auth' && !session?.token
-  const standaloneView = view === 'auth' || view === 'onboarding' || view === 'paywall' || view === 'success'
+  const standaloneView = view === 'auth' || view === 'onboarding' || view === 'paywall' || view === 'success' || view === 'player'
   const showBottomNav = Boolean(session?.token && !accountPending && !onboardingRequired && ['home', 'duas', 'search', 'collection', 'episode'].includes(view))
-  const showTopMiniPlayer = Boolean(player && view !== 'home' && !standaloneView)
+  const showTopMiniPlayer = Boolean(player && view !== 'home' && view !== 'player' && !standaloneView)
+
+  useEffect(() => {
+    if (!session?.token || accountPending || onboardingRequired) return
+    const seen = new Set<string>()
+    const candidates: Episode[] = []
+    const add = (episode?: Episode | null) => {
+      if (!episode || seen.has(episode.id)) return
+      if (!premium && !episode.isFree) return
+      seen.add(episode.id)
+      candidates.push(episode)
+    }
+
+    add(featuredEpisode)
+    freeCollection?.episodes.forEach(add)
+    topCollectionEpisodesFromHome(homeContent, allCollections).forEach(add)
+    if (view === 'collection') selectedCollection?.episodes.forEach(add)
+    if (view === 'episode' || view === 'player') add(fullPlayerEpisode || selectedEpisode)
+
+    candidates.slice(0, 12).forEach((episode) => {
+      void loadEpisodeStream(episode).catch(() => undefined)
+    })
+  }, [
+    accountPending,
+    allCollections,
+    featuredEpisode,
+    freeCollection,
+    fullPlayerEpisode,
+    homeContent,
+    loadEpisodeStream,
+    onboardingRequired,
+    premium,
+    selectedCollection,
+    selectedEpisode,
+    session?.token,
+    view,
+  ])
 
   const openCollection = (collectionId: string) => {
     setSelectedCollectionId(collectionId)
@@ -1095,6 +1188,20 @@ function App() {
     setSelectedEpisodeId(episodeId)
     setView('episode')
     window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const openFullPlayer = async (episode: Episode, collection?: Collection) => {
+    if (!episode.isFree && !premium) {
+      await promptPaywall(episode)
+      return
+    }
+    if (episode.collectionId) setSelectedCollectionId(episode.collectionId)
+    setSelectedEpisodeId(episode.id)
+    setPlayerTargetEpisodeId(episode.id)
+    setView('player')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+    if (player?.episode.id === episode.id) return
+    void playEpisode(episode, collection, { toggleCurrent: false })
   }
 
   const promptPaywall = async (episode?: Episode) => {
@@ -1118,7 +1225,8 @@ function App() {
     }
   }
 
-  const playEpisode = async (episode: Episode, collection?: Collection) => {
+  const playEpisode = async (episode: Episode, collection?: Collection, options: PlayEpisodeOptions = {}) => {
+    const toggleCurrent = options.toggleCurrent !== false
     if (!episode.isFree && !premium) {
       await promptPaywall(episode)
       return
@@ -1131,6 +1239,8 @@ function App() {
       audio.currentSrc !== AUDIO_UNLOCK_SRC
 
     if (hasLoadedCurrentEpisode) {
+      setPlayerTargetEpisodeId(episode.id)
+      if (!toggleCurrent) return
       if (audio.paused) {
         audio
           .play()
@@ -1143,38 +1253,52 @@ function App() {
       return
     }
 
-    if (audio) await primeAudioForGesture(audio)
     duaAudioRef.current?.pause()
     setDuaAudio((current) => (current ? { ...current, playing: false } : null))
-    setNetworkBusy(true)
-    try {
-      const stream = await apiFetch<{ url: string; duration?: number }>(`/stream/${episode.id}`)
-      const src = mediaUrl(stream.url)
+    const cachedStream = streamCacheRef.current.get(episode.id)
+    const playStream = (stream: EpisodeStream) => {
+      setPlayerTargetEpisodeId(episode.id)
       setPlayer({
         episode,
         collection,
-        src,
+        src: stream.src,
         playing: true,
         progress: 0,
         duration: stream.duration || episode.duration || 0,
       })
       listened60Ref.current = false
       lastHistorySaveRef.current = 0
-      if (audio) {
-        audio.muted = false
-        audio.loop = false
-        if (audio.currentSrc !== src && audio.getAttribute('src') !== src) {
-          audio.src = src
-          audio.load()
-        }
-        audio.currentTime = 0
-        try {
-          await audio.play()
-        } catch {
-          setPlayer((current) => (current?.episode.id === episode.id ? { ...current, playing: false } : current))
-          setToast('Touchez à nouveau le bouton lecture.')
-        }
+      if (!audio) return
+      audio.muted = false
+      audio.loop = false
+      if (audio.currentSrc !== stream.src && audio.getAttribute('src') !== stream.src) {
+        audio.src = stream.src
+        audio.load()
       }
+      audio.currentTime = 0
+      void audio.play().then(() => {
+        setPlayer((current) => (current?.episode.id === episode.id ? { ...current, playing: true } : current))
+      }).catch(() => {
+        setPlayer((current) => (current?.episode.id === episode.id ? { ...current, playing: false } : current))
+        setToast('Touchez à nouveau le bouton lecture.')
+      })
+    }
+
+    if (cachedStream) {
+      playStream(cachedStream)
+      if (!localStorage.getItem(FIRST_PLAY_KEY)) {
+        localStorage.setItem(FIRST_PLAY_KEY, '1')
+        trackEvent('first_play', { episode_id: episode.id, collection_id: collection?.id || episode.collectionId })
+      }
+      trackEvent('audio_play_started', { episode_id: episode.id, collection_id: collection?.id || episode.collectionId })
+      return
+    }
+
+    if (audio) await primeAudioForGesture(audio)
+    setNetworkBusy(true)
+    try {
+      const stream = await loadEpisodeStream(episode)
+      playStream(stream)
       if (!localStorage.getItem(FIRST_PLAY_KEY)) {
         localStorage.setItem(FIRST_PLAY_KEY, '1')
         trackEvent('first_play', { episode_id: episode.id, collection_id: collection?.id || episode.collectionId })
@@ -1233,49 +1357,66 @@ function App() {
     audioRef.current?.pause()
     setPlayer((current) => (current ? { ...current, playing: false } : null))
     const src = mediaUrl(dua.audio_url_ar || `/stream/duas/${dua.id}/ar`)
+    const audio = duaAudioRef.current
     setDuaAudio({
       dua,
       src,
-      playing: true,
+      playing: Boolean(audio),
       repeat,
       progress: 0,
       duration: 0,
     })
-    const audio = duaAudioRef.current
-    if (!audio) return
-    if (audio.src !== src) {
+    if (!audio) {
+      setToast('Audio indisponible pour le moment.')
+      return
+    }
+    if (audio.currentSrc !== src && audio.getAttribute('src') !== src) {
       audio.src = src
       audio.load()
     }
     audio.loop = repeat
     audio.currentTime = 0
-    audio.play().catch(() => {
-      setDuaAudio((current) => (current?.dua.id === dua.id ? { ...current, playing: false } : current))
-      setToast('Touchez à nouveau le bouton lecture.')
+    void audio.play().then(() => {
+      setDuaAudio((current) => (current?.dua.id === dua.id ? { ...current, playing: true, repeat } : current))
+    }).catch(() => {
+      setDuaAudio((current) => (current?.dua.id === dua.id ? { ...current, playing: false, repeat } : current))
+      setToast('Audio invocation indisponible pour le moment.')
     })
   }
 
-  const toggleDuaPlayback = (dua: Dua, repeat = false) => {
+  const toggleDuaPlayback = (dua: Dua) => {
     const audio = duaAudioRef.current
     if (duaAudio?.dua.id !== dua.id || !audio) {
-      startDua(dua, repeat)
+      startDua(dua, false)
       return
-    }
-    if (repeat !== duaAudio.repeat) {
-      setDuaAudio({ ...duaAudio, repeat })
-      audio.loop = repeat
     }
     if (audio.paused) {
       audio
         .play()
-        .then(() => setDuaAudio({ ...duaAudio, playing: true, repeat }))
+        .then(() => setDuaAudio((current) => (current?.dua.id === dua.id ? { ...current, playing: true } : current)))
         .catch(() => {
-          setDuaAudio({ ...duaAudio, playing: false, repeat })
-          setToast('Touchez à nouveau le bouton lecture.')
+          setDuaAudio((current) => (current?.dua.id === dua.id ? { ...current, playing: false } : current))
+          setToast('Audio invocation indisponible pour le moment.')
         })
     } else {
       audio.pause()
-      setDuaAudio({ ...duaAudio, playing: false, repeat })
+      audio.currentTime = 0
+      setDuaAudio({ ...duaAudio, playing: false, progress: 0 })
+    }
+  }
+
+  const toggleDuaRepeat = (dua: Dua) => {
+    const audio = duaAudioRef.current
+    if (duaAudio?.dua.id !== dua.id || !audio) {
+      startDua(dua, true)
+      return
+    }
+
+    const repeat = !duaAudio.repeat
+    audio.loop = repeat
+    setDuaAudio({ ...duaAudio, repeat })
+    if (repeat && audio.paused) {
+      startDua(dua, true)
     }
   }
 
@@ -1424,7 +1565,7 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
+    <main className={view === 'player' ? 'app-shell player-shell' : 'app-shell'}>
       <audio
         ref={audioRef}
         src={player?.src}
@@ -1475,6 +1616,7 @@ function App() {
             onOpenCollection={openCollection}
             onOpenEpisode={openEpisode}
             onPlay={playEpisode}
+            onOpenPlayer={openFullPlayer}
             onPaywall={promptPaywall}
             onTogglePlayer={togglePlayback}
             onPrevious={() => playAdjacentEpisode(-1)}
@@ -1496,6 +1638,7 @@ function App() {
             onMemoryFilter={setDuaMemoryFilter}
             onRetry={loadDuas}
             onPlay={toggleDuaPlayback}
+            onRepeat={toggleDuaRepeat}
             onKnown={toggleKnownDua}
           />
         )}
@@ -1516,6 +1659,31 @@ function App() {
             onBack={() => setView(selectedEpisode.collectionId ? 'collection' : 'home')}
             onPlay={playEpisode}
             onPaywall={promptPaywall}
+          />
+        )}
+        {!accountPending && view === 'player' && fullPlayerEpisode && (
+          <PlayerView
+            episode={fullPlayerEpisode}
+            collection={fullPlayerCollection}
+            player={player}
+            onClose={() => setView('home')}
+            onToggle={togglePlayback}
+            onPrevious={() => playAdjacentEpisode(-1)}
+            onNext={() => playAdjacentEpisode(1)}
+            onSeek={(seconds) => {
+              const audio = audioRef.current
+              if (!audio || !player) return
+              const next = Math.max(0, Math.min(seconds, audio.duration || player.duration || seconds))
+              audio.currentTime = next
+              setPlayer({ ...player, progress: next })
+            }}
+            onSeekBy={(delta) => {
+              const audio = audioRef.current
+              if (!audio || !player) return
+              const next = Math.max(0, Math.min(audio.currentTime + delta, audio.duration || player.duration || audio.currentTime + delta))
+              audio.currentTime = next
+              setPlayer({ ...player, progress: next })
+            }}
           />
         )}
         {!accountPending && view === 'search' && (
@@ -1729,6 +1897,7 @@ function HomeView({
   onOpenCollection,
   onOpenEpisode,
   onPlay,
+  onOpenPlayer,
   onPaywall,
   onTogglePlayer,
   onPrevious,
@@ -1747,6 +1916,7 @@ function HomeView({
   onOpenCollection: (id: string) => void
   onOpenEpisode: (id: string) => void
   onPlay: (episode: Episode, collection?: Collection) => void
+  onOpenPlayer: (episode: Episode, collection?: Collection) => void
   onPaywall: () => void
   onTogglePlayer: () => void
   onPrevious: () => void
@@ -1768,6 +1938,7 @@ function HomeView({
           collection={featuredCollection}
           player={player}
           onPlay={() => (player?.episode.id === featuredEpisode.id ? onTogglePlayer() : onPlay(featuredEpisode, featuredCollection))}
+          onOpenPlayer={() => onOpenPlayer(featuredEpisode, featuredCollection)}
           onPrevious={onPrevious}
           onNext={onNext}
         />
@@ -1831,6 +2002,7 @@ function AudioHeroCard({
   collection,
   player,
   onPlay,
+  onOpenPlayer,
   onPrevious,
   onNext,
 }: {
@@ -1838,6 +2010,7 @@ function AudioHeroCard({
   collection?: Collection
   player: PlayerState | null
   onPlay: () => void
+  onOpenPlayer: () => void
   onPrevious: () => void
   onNext: () => void
 }) {
@@ -1845,14 +2018,26 @@ function AudioHeroCard({
   const percent = isCurrent && player?.duration ? Math.min(100, (player.progress / player.duration) * 100) : 0
 
   return (
-    <section className="audio-hero">
+    <section
+      className="audio-hero"
+      role="button"
+      tabIndex={0}
+      onClick={onOpenPlayer}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onOpenPlayer()
+        }
+      }}
+      aria-label={`Ouvrir le lecteur pour ${episode.title}`}
+    >
       <img src={mediaUrl(episode.heroImageUrl || episode.coverUrl || collection?.coverUrl)} alt="" />
       <div className="audio-hero-overlay">
         <div>
           <h1>{episode.title}</h1>
           <span>{collection?.name || episode.collectionName || 'Histoires'}</span>
         </div>
-        <div className="audio-controls">
+        <div className="audio-controls" onClick={(event) => event.stopPropagation()}>
           <button className="play-main" type="button" onClick={onPlay} aria-label={isCurrent && player?.playing ? 'Pause' : 'Lecture'}>
             {isCurrent && player?.playing ? <Pause size={25} /> : <Play size={25} />}
           </button>
@@ -2009,6 +2194,7 @@ function DuasView({
   onMemoryFilter,
   onRetry,
   onPlay,
+  onRepeat,
   onKnown,
 }: {
   duas: Dua[]
@@ -2023,7 +2209,8 @@ function DuasView({
   onCategory: (category: string) => void
   onMemoryFilter: (filter: DuaMemoryFilter) => void
   onRetry: () => void
-  onPlay: (dua: Dua, repeat?: boolean) => void
+  onPlay: (dua: Dua) => void
+  onRepeat: (dua: Dua) => void
   onKnown: (duaId: string) => void
 }) {
   if (loading) return <LoadingState />
@@ -2103,7 +2290,7 @@ function DuasView({
             playing={duaAudio?.dua.id === dua.id && duaAudio.playing}
             repeating={duaAudio?.dua.id === dua.id && duaAudio.repeat}
             onPlay={() => onPlay(dua)}
-            onRepeat={() => onPlay(dua, true)}
+            onRepeat={() => onRepeat(dua)}
             onKnown={() => onKnown(dua.id)}
           />
         ))}
@@ -2257,6 +2444,109 @@ function EpisodeView({
           {locked ? <Crown size={19} /> : <Play size={19} />}
           {locked ? 'Débloquer' : 'Écouter'}
         </button>
+      </section>
+    </div>
+  )
+}
+
+function PlayerView({
+  episode,
+  collection,
+  player,
+  onClose,
+  onToggle,
+  onPrevious,
+  onNext,
+  onSeek,
+  onSeekBy,
+}: {
+  episode: Episode
+  collection?: Collection
+  player: PlayerState | null
+  onClose: () => void
+  onToggle: () => void
+  onPrevious: () => void
+  onNext: () => void
+  onSeek: (seconds: number) => void
+  onSeekBy: (seconds: number) => void
+}) {
+  const isCurrent = player?.episode.id === episode.id
+  const progress = isCurrent ? player.progress : 0
+  const duration = (isCurrent ? player.duration : episode.duration) || episode.duration || 0
+  const trackIndex = collection?.episodes.findIndex((item) => item.id === episode.id) ?? -1
+  const trackLabel = collection?.episodes.length ? `Piste ${trackIndex >= 0 ? trackIndex + 1 : 1}/${collection.episodes.length}` : 'Piste 1/1'
+  const cover = mediaUrl(episode.heroImageUrl || episode.coverUrl || collection?.coverUrl)
+
+  return (
+    <div className="player-screen">
+      <img className="player-cover-bg" src={cover} alt="" />
+      <div className="player-gradient" />
+      <button className="player-collapse" type="button" onClick={onClose} aria-label="Rabattre le lecteur">
+        <ChevronDown size={34} />
+      </button>
+
+      <section className="player-panel" aria-label="Lecteur audio">
+        <div className="player-title-block">
+          <h1>{episode.title}</h1>
+          <p className="player-meta">{collection?.name || episode.collectionName || 'Histoires NEA KIDZ'}</p>
+          <p className="player-track">
+            {trackLabel} • {durationLabel(progress)} / {durationLabel(duration)}
+          </p>
+        </div>
+
+        <div className="player-progress-control">
+          <input
+            type="range"
+            min="0"
+            max={Math.max(1, duration)}
+            value={Math.min(progress, Math.max(1, duration))}
+            onChange={(event) => onSeek(Number(event.target.value))}
+            aria-label="Progression"
+          />
+          <div>
+            <span>{durationLabel(progress)}</span>
+            <span>{durationLabel(duration)}</span>
+          </div>
+        </div>
+
+        <div className="player-main-controls">
+          <button type="button" onClick={onPrevious} aria-label="Épisode précédent">
+            <SkipBack size={31} />
+          </button>
+          <button className="player-round-secondary" type="button" onClick={() => onSeekBy(-15)} aria-label="Reculer de 15 secondes">
+            <RotateCcw size={28} />
+            <span>15</span>
+          </button>
+          <button className="player-round-main" type="button" onClick={onToggle} aria-label={isCurrent && player?.playing ? 'Pause' : 'Lecture'}>
+            {isCurrent && player?.playing ? <Pause size={34} /> : <Play size={34} />}
+          </button>
+          <button className="player-round-secondary" type="button" onClick={() => onSeekBy(15)} aria-label="Avancer de 15 secondes">
+            <RotateCw size={28} />
+            <span>15</span>
+          </button>
+          <button type="button" onClick={onNext} aria-label="Épisode suivant">
+            <SkipForward size={31} />
+          </button>
+        </div>
+
+        <div className="player-secondary-actions">
+          <button type="button">
+            <ListMusic size={25} />
+            <span>À suivre</span>
+          </button>
+          <button type="button">
+            <Timer size={25} />
+            <span>Minuteur</span>
+          </button>
+          <button type="button">
+            <Plus size={25} />
+            <span>Playlist</span>
+          </button>
+          <button type="button">
+            <Info size={25} />
+            <span>Détails</span>
+          </button>
+        </div>
       </section>
     </div>
   )
