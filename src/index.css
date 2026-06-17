@@ -529,7 +529,7 @@ p {
 
 .story-card {
   min-width: 0;
-  height: 244px;
+  height: 252px;
 }
 
 .story-art {
@@ -588,7 +588,7 @@ p {
 
 .story-title {
   width: 100%;
-  min-height: 74px;
+  height: 74px;
   display: grid;
   align-content: start;
   gap: 7px;
@@ -600,20 +600,22 @@ p {
   background: var(--surface);
   text-align: center;
   color: var(--text);
-  font-size: calc(14.2px * var(--text-scale));
-  line-height: 1.08;
-  font-weight: 600;
   box-shadow: 0 8px 16px rgba(159, 111, 20, 0.08);
 }
 
 .story-title span {
   display: -webkit-box;
-  max-height: 2.16em;
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+  color: var(--text);
+  font-size: var(--story-title-size, 17px);
+  line-height: 1.08;
+  font-weight: 600;
+  text-wrap: balance;
   text-overflow: ellipsis;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .story-title small {
@@ -709,14 +711,11 @@ p {
 
 .top-story-title {
   display: block;
-  height: 58px;
+  min-height: 58px;
   padding: 10px 10px 8px;
   overflow: hidden;
   border-top: 1px solid var(--border);
   color: var(--text);
-  font-size: calc(14.5px * var(--text-scale));
-  line-height: 1.08;
-  font-weight: 600;
   text-align: center;
 }
 
@@ -724,7 +723,13 @@ p {
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
+  color: var(--text);
+  font-size: var(--top-story-title-size, 17px);
+  line-height: 1.08;
+  font-weight: 600;
+  text-wrap: balance;
+  text-overflow: ellipsis;
 }
 
 .collection-tile {

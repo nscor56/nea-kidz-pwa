@@ -43,7 +43,7 @@ import {
   WifiOff,
   X,
 } from 'lucide-react'
-import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { type CSSProperties, type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 const PUBLIC_API_BASE = 'https://api.neakidz.com'
 const API_BASE = import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? '/api' : PUBLIC_API_BASE)
@@ -121,10 +121,24 @@ type User = {
   provider: string | null
   is_premium?: boolean
   isPremium?: boolean
+  premium_status?: string | null
   expiresAt?: number | string | null
+  expires_at?: number | string | null
   premium_until?: number | string | null
+  premiumUntil?: number | string | null
   subscriptionStatus?: string
   subscription_status?: string
+  subscription?: {
+    status?: string | null
+    plan?: string | null
+    provider?: string | null
+    expires_at?: number | string | null
+    expiresAt?: number | string | null
+    will_renew?: boolean | number | string | null
+    willRenew?: boolean | number | string | null
+    auto_renewing?: boolean | number | string | null
+    autoRenewing?: boolean | number | string | null
+  } | null
   willRenew?: boolean
   will_renew?: boolean
   usage_context?: string
@@ -317,19 +331,79 @@ function durationLabel(seconds?: number) {
   return `${min}:${sec}`
 }
 
+type TitleStyle = CSSProperties & { '--story-title-size'?: string; '--top-story-title-size'?: string }
+
+function featureStoryTitleStyle(title: string): TitleStyle {
+  const length = title.trim().length
+  const size = length > 34 ? 13.2 : length > 24 ? 15.6 : 17
+  return { '--story-title-size': `${size}px` }
+}
+
+function topStoryTitleStyle(title: string): TitleStyle {
+  const length = title.trim().length
+  const size = length > 28 ? 14.5 : length > 20 ? 15.5 : 17
+  return { '--top-story-title-size': `${size}px` }
+}
+
 function planLabel(plan?: string | null) {
-  if (plan === 'yearly') return 'Annuel'
-  if (plan === 'monthly') return 'Mensuel'
+  const normalized = String(plan || '').trim().toLowerCase()
+  if (normalized.includes('year') || normalized.includes('annual') || normalized.includes('annuel')) return 'Annuel'
+  if (normalized.includes('month') || normalized.includes('mens')) return 'Mensuel'
   return 'Premium'
+}
+
+function parseNullableBool(value: unknown) {
+  if (value === null || value === undefined) return null
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') return value !== 0
+  const normalized = String(value).trim().toLowerCase()
+  if (!normalized) return null
+  if (['true', '1', 'yes', 'oui', 'active', 'enabled', 'paid', 'premium'].includes(normalized)) return true
+  if (['false', '0', 'no', 'non', 'cancelled', 'canceled', 'disabled', 'free', 'expired'].includes(normalized)) return false
+  return null
+}
+
+function parseEntitlementDate(value: unknown) {
+  if (value === null || value === undefined || value === '') return null
+  if (typeof value === 'number') {
+    const milliseconds = value > 10_000_000_000 ? value : value * 1000
+    return Number.isFinite(milliseconds) ? milliseconds : null
+  }
+  const text = String(value).trim()
+  const numeric = Number(text)
+  if (Number.isFinite(numeric)) {
+    const milliseconds = numeric > 10_000_000_000 ? numeric : numeric * 1000
+    return milliseconds
+  }
+  const parsed = Date.parse(text)
+  return Number.isNaN(parsed) ? null : parsed
 }
 
 function isPremiumUser(user: User | null) {
   if (!user) return false
-  const flag = user.is_premium ?? user.isPremium ?? (user.status === 'paid' || user.status === 'premium')
-  const rawDate = user.expiresAt ?? user.premium_until
-  if (!flag || !rawDate) return Boolean(flag)
-  const expiresMs = typeof rawDate === 'number' ? rawDate * 1000 : Date.parse(String(rawDate))
-  return Number.isNaN(expiresMs) ? Boolean(flag) : expiresMs > Date.now()
+  const status = String(user.status || '').trim().toLowerCase()
+  const premiumStatus = String(user.premium_status || '').trim().toLowerCase()
+  const subscriptionStatus = String(user.subscriptionStatus || user.subscription_status || user.subscription?.status || '').trim().toLowerCase()
+  const premiumFlag = parseNullableBool(user.is_premium) === true || parseNullableBool(user.isPremium) === true
+  const hasPremiumSignal =
+    premiumFlag ||
+    status === 'paid' ||
+    status === 'premium' ||
+    premiumStatus === 'paid' ||
+    premiumStatus === 'premium' ||
+    ['active', 'trialing', 'past_due'].includes(subscriptionStatus)
+
+  if (!hasPremiumSignal) return false
+
+  const rawDate =
+    user.expiresAt ??
+    user.expires_at ??
+    user.premium_until ??
+    user.premiumUntil ??
+    user.subscription?.expiresAt ??
+    user.subscription?.expires_at
+  const expiresMs = parseEntitlementDate(rawDate)
+  return expiresMs === null || expiresMs > Date.now()
 }
 
 function needsOnboarding(user: User | null) {
@@ -365,10 +439,11 @@ function userWithCompletedOnboarding(user: User | null, values?: Partial<Onboard
 }
 
 function providerLabel(provider?: string | null) {
-  if (provider === 'stripe') return 'Stripe Web'
-  if (provider === 'google' || provider === 'google_play') return 'Google Play'
-  if (provider === 'apple') return 'Apple'
-  if (provider === 'promo') return 'Offre promo'
+  const normalized = String(provider || '').trim().toLowerCase()
+  if (normalized === 'stripe') return 'Stripe Web'
+  if (normalized === 'google' || normalized === 'google_play') return 'Google Play'
+  if (normalized === 'apple') return 'Apple'
+  if (normalized === 'promo') return 'Offre promo'
   return 'Compte NEA KIDZ'
 }
 
@@ -1487,7 +1562,7 @@ function Rail({
               </span>
             </button>
             <button className="story-title" type="button" onClick={() => onPlay(episode)}>
-              <span>{episode.title}</span>
+              <span style={featureStoryTitleStyle(episode.title)}>{episode.title}</span>
               <small>
                 <Clock3 size={12} />
                 {durationLabel(episode.duration)}
@@ -1529,7 +1604,7 @@ function TopStoriesRail({
                   {locked && <span className="premium-badge">Premium</span>}
                 </span>
                 <span className="top-story-title">
-                  <span>{episode.title}</span>
+                  <span style={topStoryTitleStyle(episode.title)}>{episode.title}</span>
                 </span>
               </button>
             </article>
@@ -1971,7 +2046,9 @@ function ProfileView({
     )
   }
 
-  const status = user.subscriptionStatus || user.subscription_status || (premium ? 'active' : 'free')
+  const status = user.subscriptionStatus || user.subscription_status || user.subscription?.status || (premium ? 'active' : 'free')
+  const plan = user.plan || user.subscription?.plan || null
+  const provider = user.provider || user.subscription?.provider || null
   return (
     <div className="screen profile-screen">
       <section className="profile-panel">
@@ -1980,7 +2057,7 @@ function ProfileView({
         <p>{user.email}</p>
         <span className={premium ? 'status-pill' : 'status-pill muted'}>
           {premium ? <BadgeCheck size={14} /> : <Gift size={14} />}
-          {premium ? `${planLabel(user.plan)} actif` : 'Compte gratuit'}
+          {premium ? `${planLabel(plan)} actif` : 'Compte gratuit'}
         </span>
       </section>
       <div className="settings-list">
@@ -1995,10 +2072,10 @@ function ProfileView({
           <CreditCard size={20} />
           <div>
             <strong>Provider</strong>
-            <span>{providerLabel(user.provider)}</span>
+            <span>{providerLabel(provider)}</span>
           </div>
         </div>
-        {premium && user.provider === 'stripe' && (
+        {premium && String(provider || '').trim().toLowerCase() === 'stripe' && (
           <button className="settings-row action-row" type="button" onClick={onPortal} disabled={busy}>
             <CreditCard size={20} />
             <div>
