@@ -2189,6 +2189,20 @@ function App() {
     playEpisode(nextEpisode, nextCollection)
   }
 
+  const addEpisodeToPlaylist = async (playlistId: string, episodeId: string) => {
+    setNetworkBusy(true)
+    try {
+      await apiFetch(`/user/playlists/${playlistId}/episodes/${episodeId}`, { method: 'POST' })
+      await loadUserLibrary()
+      setToast('Ajouté à la playlist.')
+    } catch (error) {
+      const apiError = error as ApiError
+      setToast(apiError.status === 403 ? 'Les playlists sont réservées aux membres premium.' : apiError.message || 'Playlist indisponible.')
+    } finally {
+      setNetworkBusy(false)
+    }
+  }
+
   const closePlayer = () => {
     audioRef.current?.pause()
     setPlayer(null)
@@ -2544,10 +2558,14 @@ function App() {
             episode={fullPlayerEpisode}
             collection={fullPlayerCollection}
             player={player}
+            playlists={playlists}
             onClose={() => setView('home')}
             onToggle={togglePlayback}
             onPrevious={() => playAdjacentEpisode(-1)}
             onNext={() => playAdjacentEpisode(1)}
+            onOpenEpisode={(episodeId) => openEpisode(episodeId)}
+            onAddToPlaylist={addEpisodeToPlaylist}
+            onToast={setToast}
             onSeek={(seconds) => {
               const audio = audioRef.current
               if (!audio || !player) return
@@ -3479,29 +3497,56 @@ function PlayerView({
   episode,
   collection,
   player,
+  playlists,
   onClose,
   onToggle,
   onPrevious,
   onNext,
+  onOpenEpisode,
+  onAddToPlaylist,
+  onToast,
   onSeek,
   onSeekBy,
 }: {
   episode: Episode
   collection?: Collection
   player: PlayerState | null
+  playlists: PlaylistItem[]
   onClose: () => void
   onToggle: () => void
   onPrevious: () => void
   onNext: () => void
+  onOpenEpisode: (episodeId: string) => void
+  onAddToPlaylist: (playlistId: string, episodeId: string) => void
+  onToast: (message: string) => void
   onSeek: (seconds: number) => void
   onSeekBy: (seconds: number) => void
 }) {
+  const [panel, setPanel] = useState<'queue' | 'timer' | 'playlist' | 'details' | null>(null)
+  const [sleepMinutes, setSleepMinutes] = useState<number | null>(null)
   const isCurrent = player?.episode.id === episode.id
   const progress = isCurrent ? player.progress : 0
   const duration = (isCurrent ? player.duration : episode.duration) || episode.duration || 0
   const trackIndex = collection?.episodes.findIndex((item) => item.id === episode.id) ?? -1
   const trackLabel = collection?.episodes.length ? `Piste ${trackIndex >= 0 ? trackIndex + 1 : 1}/${collection.episodes.length}` : 'Piste 1/1'
   const cover = mediaUrl(episode.heroImageUrl || episode.coverUrl || collection?.coverUrl)
+  const queueEpisodes = collection?.episodes || [episode]
+
+  useEffect(() => {
+    if (!sleepMinutes) return undefined
+    const timer = window.setTimeout(() => {
+      if (player?.playing) onToggle()
+      setSleepMinutes(null)
+      onToast('Minuteur terminé. Lecture mise en pause.')
+    }, sleepMinutes * 60 * 1000)
+    return () => window.clearTimeout(timer)
+  }, [onToast, onToggle, player?.playing, sleepMinutes])
+
+  const selectSleepTimer = (minutes: number | null) => {
+    setSleepMinutes(minutes)
+    setPanel(null)
+    onToast(minutes ? `Minuteur réglé sur ${minutes} minutes.` : 'Minuteur désactivé.')
+  }
 
   return (
     <div className="player-screen">
@@ -3556,26 +3601,96 @@ function PlayerView({
         </div>
 
         <div className="player-secondary-actions">
-          <button type="button">
+          <button className={panel === 'queue' ? 'active' : ''} type="button" onClick={() => setPanel(panel === 'queue' ? null : 'queue')}>
             <ListMusic size={25} />
             <span>À suivre</span>
           </button>
-          <button type="button">
+          <button className={sleepMinutes ? 'active' : panel === 'timer' ? 'active' : ''} type="button" onClick={() => setPanel(panel === 'timer' ? null : 'timer')}>
             <Timer size={25} />
-            <span>Minuteur</span>
+            <span>{sleepMinutes ? `${sleepMinutes} min` : 'Minuteur'}</span>
           </button>
-          <button type="button">
+          <button className={panel === 'playlist' ? 'active' : ''} type="button" onClick={() => setPanel(panel === 'playlist' ? null : 'playlist')}>
             <Plus size={25} />
             <span>Playlist</span>
           </button>
-          <button type="button">
+          <button className={panel === 'details' ? 'active' : ''} type="button" onClick={() => setPanel(panel === 'details' ? null : 'details')}>
             <Info size={25} />
             <span>Détails</span>
           </button>
         </div>
+
+        {panel && (
+          <div className="player-action-sheet">
+            <div className="player-action-sheet-head">
+              <strong>{panelTitle(panel)}</strong>
+              <button type="button" onClick={() => setPanel(null)} aria-label="Fermer">
+                <X size={18} />
+              </button>
+            </div>
+
+            {panel === 'queue' && (
+              <div className="player-queue-list">
+                {queueEpisodes.map((item, index) => (
+                  <button className={item.id === episode.id ? 'active' : ''} type="button" key={item.id} onClick={() => onOpenEpisode(item.id)}>
+                    <span>{index + 1}</span>
+                    <strong>{item.title}</strong>
+                    <small>{durationLabel(item.duration)}</small>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {panel === 'timer' && (
+              <div className="player-sheet-grid">
+                {[15, 30, 60].map((minutes) => (
+                  <button className={sleepMinutes === minutes ? 'active' : ''} type="button" key={minutes} onClick={() => selectSleepTimer(minutes)}>
+                    {minutes} min
+                  </button>
+                ))}
+                <button type="button" onClick={() => selectSleepTimer(null)}>
+                  Désactiver
+                </button>
+              </div>
+            )}
+
+            {panel === 'playlist' && (
+              playlists.length > 0 ? (
+                <div className="player-queue-list">
+                  {playlists.map((playlist) => (
+                    <button type="button" key={playlist.id} onClick={() => onAddToPlaylist(playlist.id, episode.id)}>
+                      <span><ListMusic size={16} /></span>
+                      <strong>{playlist.title}</strong>
+                      <small>{playlist.episodes?.length || 0} {(playlist.episodes?.length || 0) > 1 ? 'histoires' : 'histoire'}</small>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="player-sheet-muted">Aucune playlist synchronisée sur ce compte.</p>
+              )
+            )}
+
+            {panel === 'details' && (
+              <div className="player-details-card">
+                <p><strong>Collection</strong><span>{collection?.name || episode.collectionName || 'Histoires NEA KIDZ'}</span></p>
+                <p><strong>Durée</strong><span>{durationLabel(duration)}</span></p>
+                <p><strong>Accès</strong><span>{episode.isFree ? 'Gratuit' : 'Premium'}</span></p>
+                <button type="button" onClick={() => onOpenEpisode(episode.id)}>
+                  Ouvrir la page détail
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </section>
     </div>
   )
+}
+
+function panelTitle(panel: 'queue' | 'timer' | 'playlist' | 'details') {
+  if (panel === 'queue') return 'À suivre'
+  if (panel === 'timer') return 'Minuteur'
+  if (panel === 'playlist') return 'Ajouter à une playlist'
+  return 'Détails'
 }
 
 function SearchView({

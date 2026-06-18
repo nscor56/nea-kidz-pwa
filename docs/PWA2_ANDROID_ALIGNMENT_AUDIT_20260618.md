@@ -71,4 +71,4 @@ Périmètre: `app2.neakidz.com` uniquement. `app.neakidz.com` non modifié.
 - 99 noms d'Allah PWA corrigé le 2026-06-18 : vue complète 99 noms, groupes 1-33/34-66/67-99, recherche et audio `/stream/allah-names/:number`.
 - Web Push réel non implémenté (`PushManager.subscribe` + `/me/push-tokens`).
 - Downloads offline natifs Android non transposés; nécessiterait design IndexedDB/cache quota et UX spécifique web.
-- Sous-actions player `À suivre`, `Minuteur`, `Playlist`, `Détails` restent visuellement présentes mais pas au niveau Android complet.
+- Sous-actions player `À suivre`, `Minuteur`, `Playlist`, `Détails` corrigées le 2026-06-18 : panneaux PWA fonctionnels, queue collection, minuteur 15/30/60, ajout playlist via `/user/playlists/:playlistId/episodes/:episodeId`, lien page détail.
