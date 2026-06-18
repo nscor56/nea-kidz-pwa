@@ -320,6 +320,25 @@ type SearchResult = {
   episodes: Episode[]
 }
 
+type FavoriteItem = {
+  episodeId: string
+  title: string
+  collectionId?: string
+  collectionName?: string
+  addedAt?: string
+}
+
+type PlaylistItem = {
+  id: string
+  title: string
+  description?: string
+  episodes?: Episode[]
+}
+
+type PlaylistsResponse = {
+  playlists?: PlaylistItem[]
+}
+
 type HistoryItem = {
   episodeId: string
   title: string
@@ -889,6 +908,8 @@ function App() {
   const [catalog, setCatalog] = useState<Catalog | null>(null)
   const [homeContent, setHomeContent] = useState<HomeContent | null>(null)
   const [profileHistory, setProfileHistory] = useState<HistoryItem[]>([])
+  const [favorites, setFavorites] = useState<FavoriteItem[]>([])
+  const [playlists, setPlaylists] = useState<PlaylistItem[]>([])
   const [loadingProfileHistory, setLoadingProfileHistory] = useState(false)
   const [catalogError, setCatalogError] = useState('')
   const [loadingCatalog, setLoadingCatalog] = useState(true)
@@ -943,11 +964,25 @@ function App() {
   }, [])
 
   const logout = useCallback(() => {
+    const token = session?.token
+    const refreshToken = session?.refreshToken
+    if (token) {
+      fetch(apiUrl('/auth/logout'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ refreshToken }),
+      }).catch(() => undefined)
+    }
     saveSession(null)
     setUser(null)
     setCatalog(null)
     setHomeContent(null)
     setProfileHistory([])
+    setFavorites([])
+    setPlaylists([])
     setPlayer(null)
     setPlayerTargetEpisodeId(null)
     streamCacheRef.current.clear()
@@ -959,7 +994,7 @@ function App() {
     setSettingsPanel('main')
     setView('auth')
     setToast('Session fermée.')
-  }, [saveSession])
+  }, [saveSession, session?.refreshToken, session?.token])
 
   const refreshSession = useCallback(async () => {
     if (!session?.refreshToken) return null
@@ -995,7 +1030,12 @@ function App() {
       }
 
       const text = await response.text()
-      const payload = text ? JSON.parse(text) : null
+      let payload: { message?: string; code?: string } | null
+      try {
+        payload = text ? JSON.parse(text) : null
+      } catch {
+        payload = text ? { message: text } : null
+      }
       if (!response.ok) {
         const error = new Error(payload?.message || 'Erreur réseau') as ApiError
         error.status = response.status
@@ -1031,7 +1071,7 @@ function App() {
                 screenHeight: window.innerHeight,
                 locale: navigator.language,
                 timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-                appVersion: 'pwa2-android-shell-0.2.0',
+                appVersion: APP_VERSION_LABEL,
               },
             }),
           },
@@ -1115,6 +1155,21 @@ function App() {
     }
   }, [apiFetch, session?.token])
 
+  const loadUserLibrary = useCallback(async () => {
+    if (!session?.token) return
+    try {
+      const [favoriteItems, playlistPayload] = await Promise.all([
+        apiFetch<FavoriteItem[]>('/user/favorites'),
+        apiFetch<PlaylistsResponse>('/user/playlists'),
+      ])
+      setFavorites(Array.isArray(favoriteItems) ? favoriteItems : [])
+      setPlaylists(Array.isArray(playlistPayload.playlists) ? playlistPayload.playlists : [])
+    } catch {
+      setFavorites([])
+      setPlaylists([])
+    }
+  }, [apiFetch, session?.token])
+
   const loadRemoteNotificationPrefs = useCallback(async () => {
     if (!session?.token) return
     try {
@@ -1156,6 +1211,8 @@ function App() {
     if (!session?.token) {
       setHomeContent(null)
       setProfileHistory([])
+      setFavorites([])
+      setPlaylists([])
       setLoadingCatalog(false)
       setLoadingDuas(false)
       setLoadingProfileHistory(false)
@@ -1165,8 +1222,9 @@ function App() {
     loadCatalog()
     loadDuas()
     loadProfileHistory()
+    loadUserLibrary()
     loadRemoteNotificationPrefs()
-  }, [loadCatalog, loadDuas, loadProfileHistory, loadRemoteNotificationPrefs, session?.token])
+  }, [loadCatalog, loadDuas, loadProfileHistory, loadRemoteNotificationPrefs, loadUserLibrary, session?.token])
 
   useEffect(() => {
     if (session?.token) refreshMe()
@@ -1734,6 +1792,37 @@ function App() {
     setDuaAudio({ ...duaAudio, progress: duaAudio.duration, playing: false })
   }
 
+  useEffect(() => {
+    if (!('mediaSession' in navigator) || !player) return
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: player.episode.title,
+      artist: player.collection?.name || player.episode.collectionName || 'NEA KIDZ',
+      album: 'NEA KIDZ',
+      artwork: [
+        {
+          src: mediaUrl(player.episode.coverUrl || player.episode.heroImageUrl || player.collection?.coverUrl),
+          sizes: '512x512',
+          type: 'image/webp',
+        },
+      ],
+    })
+    navigator.mediaSession.playbackState = player.playing ? 'playing' : 'paused'
+    navigator.mediaSession.setActionHandler('play', togglePlayback)
+    navigator.mediaSession.setActionHandler('pause', togglePlayback)
+    navigator.mediaSession.setActionHandler('previoustrack', () => playAdjacentEpisode(-1))
+    navigator.mediaSession.setActionHandler('nexttrack', () => playAdjacentEpisode(1))
+    navigator.mediaSession.setActionHandler('seekbackward', () => {
+      const audio = audioRef.current
+      if (audio) audio.currentTime = Math.max(0, audio.currentTime - 15)
+    })
+    navigator.mediaSession.setActionHandler('seekforward', () => {
+      const audio = audioRef.current
+      if (audio) audio.currentTime = Math.min(audio.duration || audio.currentTime + 15, audio.currentTime + 15)
+    })
+    // MediaSession handlers intentionally read the latest player state on each render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [player])
+
   return (
     <main className={view === 'player' ? 'app-shell player-shell' : 'app-shell'}>
       <audio
@@ -1786,6 +1875,8 @@ function App() {
             featuredEpisode={featuredEpisode}
             freeCollection={freeCollection}
             allCollections={allCollections}
+            favorites={favorites}
+            playlists={playlists}
             onRetry={loadCatalog}
             onOpenCollection={openCollection}
             onOpenEpisode={openEpisode}
@@ -1867,6 +1958,7 @@ function App() {
             result={searchResult}
             catalogEpisodes={allEpisodes}
             catalogCollections={allCollections}
+            premium={premium}
             onQuery={setQuery}
             onOpenCollection={openCollection}
             onOpenEpisode={openEpisode}
@@ -1891,6 +1983,7 @@ function App() {
             onRefresh={() => {
               refreshMe()
               loadProfileHistory()
+              loadUserLibrary()
             }}
           />
         )}
@@ -1912,11 +2005,12 @@ function App() {
               loadCatalog()
               loadDuas()
               loadProfileHistory()
+              loadUserLibrary()
               loadRemoteNotificationPrefs()
               refreshMe()
             }}
-            onDownloads={() => setToast('Histoires hors-ligne bientôt disponibles sur la PWA.')}
-            onPlaylists={() => setToast('Playlists bientôt disponibles sur la PWA.')}
+            onDownloads={() => setToast('Le téléchargement hors-ligne reste natif Android. La PWA garde seulement le cache navigateur.')}
+            onPlaylists={() => setToast(`${playlists.length} liste${playlists.length > 1 ? 's' : ''} synchronisée${playlists.length > 1 ? 's' : ''} depuis votre compte.`)}
             onContact={() => {
               window.location.href = 'mailto:contact@neakidz.com?subject=Contact%20NEA%20KIDZ'
             }}
@@ -2101,6 +2195,8 @@ function HomeView({
   featuredEpisode,
   freeCollection,
   allCollections,
+  favorites,
+  playlists,
   onRetry,
   onOpenCollection,
   onOpenEpisode,
@@ -2120,6 +2216,8 @@ function HomeView({
   featuredEpisode?: Episode
   freeCollection?: Collection
   allCollections: Collection[]
+  favorites: FavoriteItem[]
+  playlists: PlaylistItem[]
   onRetry: () => void
   onOpenCollection: (id: string) => void
   onOpenEpisode: (id: string) => void
@@ -2155,15 +2253,31 @@ function HomeView({
       <section className="playlist-section">
         <SectionHeader title="Listes de lecture" />
         <div className="playlist-strip">
-          <button className="playlist-shortcut" type="button">
+          <button className="playlist-shortcut" type="button" onClick={() => favorites[0] && onOpenEpisode(favorites[0].episodeId)}>
             <span className="playlist-icon">
               <Heart size={21} />
             </span>
             <span>
               <strong>Favoris</strong>
-              <small>0 histoire</small>
+              <small>{favorites.length} {favorites.length > 1 ? 'histoires' : 'histoire'}</small>
             </span>
           </button>
+          {playlists.slice(0, 2).map((playlist) => (
+            <button
+              className="playlist-shortcut"
+              type="button"
+              key={playlist.id}
+              onClick={() => playlist.episodes?.[0] && onOpenEpisode(playlist.episodes[0].id)}
+            >
+              <span className="playlist-icon">
+                <ListMusic size={21} />
+              </span>
+              <span>
+                <strong>{playlist.title}</strong>
+                <small>{playlist.episodes?.length || 0} {(playlist.episodes?.length || 0) > 1 ? 'histoires' : 'histoire'}</small>
+              </span>
+            </button>
+          ))}
           <button className="playlist-add" type="button" onClick={onPaywall} aria-label="Créer une liste de lecture">
             <Plus size={31} />
           </button>
@@ -2766,6 +2880,7 @@ function SearchView({
   result,
   catalogEpisodes,
   catalogCollections,
+  premium,
   onQuery,
   onOpenCollection,
   onOpenEpisode,
@@ -2776,6 +2891,7 @@ function SearchView({
   result: SearchResult
   catalogEpisodes: Episode[]
   catalogCollections: Collection[]
+  premium: boolean
   onQuery: (query: string) => void
   onOpenCollection: (id: string) => void
   onOpenEpisode: (id: string) => void
@@ -2834,7 +2950,7 @@ function SearchView({
               <EpisodeRow
                 key={episode.id}
                 episode={episode}
-                premium
+                premium={premium}
                 onOpen={() => onOpenEpisode(episode.id)}
                 onPlay={() => onPlay(episode)}
               />
