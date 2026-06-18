@@ -110,6 +110,8 @@ type MainTab = 'home' | 'duas' | 'search'
 type AuthMode = 'login' | 'register'
 type Plan = 'monthly' | 'yearly'
 type DuaMemoryFilter = 'all' | 'known' | 'learning'
+type LibraryMode = 'duas' | 'allahNames'
+type AllahNameGroup = 'all' | '1-33' | '34-66' | '67-99'
 type ThemeMode = 'light' | 'dark' | 'system'
 type TextScale = 0.9 | 1 | 1.2
 type SettingsPanel = 'main' | 'display' | 'notifications'
@@ -315,6 +317,13 @@ type Dua = {
   audio_url_fr?: string | null
 }
 
+type AllahName = {
+  number: number
+  arabic: string
+  transliteration: string
+  meaningFr: string
+}
+
 type SearchResult = {
   collections: Array<Pick<Collection, 'id' | 'name' | 'seasonId' | 'seasonName'>>
   episodes: Episode[]
@@ -428,6 +437,610 @@ const duaCategoryLabels: Record<string, string> = {
   occasions: 'Occasions',
   sourates: 'Sourates',
 }
+
+const allahNameGroups: Array<{ id: AllahNameGroup; label: string }> = [
+  { id: 'all', label: 'Tous' },
+  { id: '1-33', label: '1-33' },
+  { id: '34-66', label: '34-66' },
+  { id: '67-99', label: '67-99' },
+]
+
+const allahNames: AllahName[] = [
+  {
+    "number": 1,
+    "arabic": "اللهُ",
+    "transliteration": "Allâh",
+    "meaningFr": "Allah"
+  },
+  {
+    "number": 2,
+    "arabic": "الرَّحْمَنُ",
+    "transliteration": "Ar-Rahmân",
+    "meaningFr": "Le Tout Miséricordieux"
+  },
+  {
+    "number": 3,
+    "arabic": "الرَّحِيمُ",
+    "transliteration": "Ar-Rahîm",
+    "meaningFr": "Le Très Miséricordieux"
+  },
+  {
+    "number": 4,
+    "arabic": "الْمَلِكُ",
+    "transliteration": "Al-Malik",
+    "meaningFr": "Le Roi, Le Souverain"
+  },
+  {
+    "number": 5,
+    "arabic": "الْقُدُوسُ",
+    "transliteration": "Al-Quddûs",
+    "meaningFr": "Le Très Saint"
+  },
+  {
+    "number": 6,
+    "arabic": "السَّلَامُ",
+    "transliteration": "As-Salâm",
+    "meaningFr": "La Paix, Source de Paix"
+  },
+  {
+    "number": 7,
+    "arabic": "الْمُؤْمِنُ",
+    "transliteration": "Al-Mu'min",
+    "meaningFr": "Celui qui donne la sécurité"
+  },
+  {
+    "number": 8,
+    "arabic": "الْمُهَيْمِنُ",
+    "transliteration": "Al-Muhaymin",
+    "meaningFr": "Le Gardien, Le Prédominant"
+  },
+  {
+    "number": 9,
+    "arabic": "الْعَزِيزُ",
+    "transliteration": "Al-'Azîz",
+    "meaningFr": "Le Puissant, L'Inaccessible"
+  },
+  {
+    "number": 10,
+    "arabic": "الْجَبَّارُ",
+    "transliteration": "Al-Jabbâr",
+    "meaningFr": "L'Irrésistible, Le Réparateur"
+  },
+  {
+    "number": 11,
+    "arabic": "الْمُتَكَبِّرُ",
+    "transliteration": "Al-Mutakabbir",
+    "meaningFr": "Le Très Grand, Le Majestueux"
+  },
+  {
+    "number": 12,
+    "arabic": "الْخَالِقُ",
+    "transliteration": "Al-Khâliq",
+    "meaningFr": "Le Créateur"
+  },
+  {
+    "number": 13,
+    "arabic": "الْبَارِئُ",
+    "transliteration": "Al-Bâri'",
+    "meaningFr": "L'Inventeur, Le Créateur de toutes choses"
+  },
+  {
+    "number": 14,
+    "arabic": "الْمُصَوِّرُ",
+    "transliteration": "Al-Musawwir",
+    "meaningFr": "Le Façonneur des formes"
+  },
+  {
+    "number": 15,
+    "arabic": "الْغَفَّارُ",
+    "transliteration": "Al-Ghaffâr",
+    "meaningFr": "Le Grand Pardonneur"
+  },
+  {
+    "number": 16,
+    "arabic": "الْقَهَّارُ",
+    "transliteration": "Al-Qahhâr",
+    "meaningFr": "Le Dominateur Suprême"
+  },
+  {
+    "number": 17,
+    "arabic": "الْوَهَّابُ",
+    "transliteration": "Al-Wahhâb",
+    "meaningFr": "Le Grand Donateur"
+  },
+  {
+    "number": 18,
+    "arabic": "الرَّزَّاقُ",
+    "transliteration": "Ar-Razzâq",
+    "meaningFr": "Le Grand Pourvoyeur"
+  },
+  {
+    "number": 19,
+    "arabic": "الْفَتَّاحُ",
+    "transliteration": "Al-Fattâh",
+    "meaningFr": "L'Ouvreur des portes"
+  },
+  {
+    "number": 20,
+    "arabic": "الْعَلِيمُ",
+    "transliteration": "Al-'Alîm",
+    "meaningFr": "L'Omniscient"
+  },
+  {
+    "number": 21,
+    "arabic": "الْقَابِضُ",
+    "transliteration": "Al-Qâbid",
+    "meaningFr": "Celui qui resserre"
+  },
+  {
+    "number": 22,
+    "arabic": "الْبَاسِطُ",
+    "transliteration": "Al-Bâsit",
+    "meaningFr": "Celui qui étend et donne"
+  },
+  {
+    "number": 23,
+    "arabic": "الْخَافِضُ",
+    "transliteration": "Al-Khâfid",
+    "meaningFr": "Celui qui abaisse"
+  },
+  {
+    "number": 24,
+    "arabic": "الرَّافِعُ",
+    "transliteration": "Ar-Râfi'",
+    "meaningFr": "Celui qui élève"
+  },
+  {
+    "number": 25,
+    "arabic": "الْمُعِزُّ",
+    "transliteration": "Al-Mu'izz",
+    "meaningFr": "Celui qui donne la gloire"
+  },
+  {
+    "number": 26,
+    "arabic": "الْمُذِلُّ",
+    "transliteration": "Al-Mudhill",
+    "meaningFr": "Celui qui abaisse l'arrogant"
+  },
+  {
+    "number": 27,
+    "arabic": "السَّمِيعُ",
+    "transliteration": "As-Samî'",
+    "meaningFr": "Celui qui entend tout"
+  },
+  {
+    "number": 28,
+    "arabic": "الْبَصِيرُ",
+    "transliteration": "Al-Basîr",
+    "meaningFr": "Celui qui voit tout"
+  },
+  {
+    "number": 29,
+    "arabic": "الْحَكَمُ",
+    "transliteration": "Al-Hakam",
+    "meaningFr": "L'Arbitre, Le Juge Suprême"
+  },
+  {
+    "number": 30,
+    "arabic": "الْعَدْلُ",
+    "transliteration": "Al-'Adl",
+    "meaningFr": "Le Juste"
+  },
+  {
+    "number": 31,
+    "arabic": "اللَّطِيفُ",
+    "transliteration": "Al-Latîf",
+    "meaningFr": "Le Subtil, Le Bienveillant"
+  },
+  {
+    "number": 32,
+    "arabic": "الْخَبِيرُ",
+    "transliteration": "Al-Khabîr",
+    "meaningFr": "Le Parfaitement Informé"
+  },
+  {
+    "number": 33,
+    "arabic": "الْحَلِيمُ",
+    "transliteration": "Al-Halîm",
+    "meaningFr": "Le Clément, Le Patient"
+  },
+  {
+    "number": 34,
+    "arabic": "الْعَظِيمُ",
+    "transliteration": "Al-'Azîm",
+    "meaningFr": "Le Très Grand"
+  },
+  {
+    "number": 35,
+    "arabic": "الْغَفُورُ",
+    "transliteration": "Al-Ghafûr",
+    "meaningFr": "Le Tout Pardonnant"
+  },
+  {
+    "number": 36,
+    "arabic": "الشَّكُورُ",
+    "transliteration": "Ash-Shakûr",
+    "meaningFr": "Le Très Reconnaissant"
+  },
+  {
+    "number": 37,
+    "arabic": "الْعَلِيُّ",
+    "transliteration": "Al-'Alî",
+    "meaningFr": "Le Très Haut"
+  },
+  {
+    "number": 38,
+    "arabic": "الْكَبِيرُ",
+    "transliteration": "Al-Kabîr",
+    "meaningFr": "Le Très Grand"
+  },
+  {
+    "number": 39,
+    "arabic": "الْحَفِيظُ",
+    "transliteration": "Al-Hafîz",
+    "meaningFr": "Le Gardien, Le Préservateur"
+  },
+  {
+    "number": 40,
+    "arabic": "الْمُقِيتُ",
+    "transliteration": "Al-Muqît",
+    "meaningFr": "Le Nourricier, Le Soutien"
+  },
+  {
+    "number": 41,
+    "arabic": "الْحَسِيبُ",
+    "transliteration": "Al-Hasîb",
+    "meaningFr": "Celui qui suffit, Le Calculateur"
+  },
+  {
+    "number": 42,
+    "arabic": "الْجَلِيلُ",
+    "transliteration": "Al-Jalîl",
+    "meaningFr": "Le Majestueux"
+  },
+  {
+    "number": 43,
+    "arabic": "الْكَرِيمُ",
+    "transliteration": "Al-Karîm",
+    "meaningFr": "Le Généreux, Le Noble"
+  },
+  {
+    "number": 44,
+    "arabic": "الرَّقِيبُ",
+    "transliteration": "Ar-Raqîb",
+    "meaningFr": "Le Surveillant, Le Témoin"
+  },
+  {
+    "number": 45,
+    "arabic": "الْمُجِيبُ",
+    "transliteration": "Al-Mujîb",
+    "meaningFr": "Celui qui répond aux invocations"
+  },
+  {
+    "number": 46,
+    "arabic": "الْوَاسِعُ",
+    "transliteration": "Al-Wâsi'",
+    "meaningFr": "L'Immense, L'Omniprésent"
+  },
+  {
+    "number": 47,
+    "arabic": "الْحَكِيمُ",
+    "transliteration": "Al-Hakîm",
+    "meaningFr": "Le Sage"
+  },
+  {
+    "number": 48,
+    "arabic": "الْوَدُودُ",
+    "transliteration": "Al-Wadûd",
+    "meaningFr": "L'Affectueux, L'Aimant"
+  },
+  {
+    "number": 49,
+    "arabic": "الْمَجِيدُ",
+    "transliteration": "Al-Majîd",
+    "meaningFr": "Le Très Glorieux"
+  },
+  {
+    "number": 50,
+    "arabic": "الْبَاعِثُ",
+    "transliteration": "Al-Bâ'ith",
+    "meaningFr": "Celui qui ressuscite"
+  },
+  {
+    "number": 51,
+    "arabic": "الشَّهِيدُ",
+    "transliteration": "Ash-Shahîd",
+    "meaningFr": "Le Témoin de tout"
+  },
+  {
+    "number": 52,
+    "arabic": "الْحَقُّ",
+    "transliteration": "Al-Haqq",
+    "meaningFr": "La Vérité"
+  },
+  {
+    "number": 53,
+    "arabic": "الْوَكِيلُ",
+    "transliteration": "Al-Wakîl",
+    "meaningFr": "Le Garant, Le Mandataire"
+  },
+  {
+    "number": 54,
+    "arabic": "الْقَوِيُّ",
+    "transliteration": "Al-Qawî",
+    "meaningFr": "Le Très Fort"
+  },
+  {
+    "number": 55,
+    "arabic": "الْمَتِينُ",
+    "transliteration": "Al-Matîn",
+    "meaningFr": "Le Très Ferme, Le Solide"
+  },
+  {
+    "number": 56,
+    "arabic": "الْوَلِيُّ",
+    "transliteration": "Al-Walî",
+    "meaningFr": "L'Ami, Le Protecteur"
+  },
+  {
+    "number": 57,
+    "arabic": "الْحَمِيدُ",
+    "transliteration": "Al-Hamîd",
+    "meaningFr": "Le Digne de toute Louange"
+  },
+  {
+    "number": 58,
+    "arabic": "الْمُحْصِي",
+    "transliteration": "Al-Muhsî",
+    "meaningFr": "Celui qui dénombre tout"
+  },
+  {
+    "number": 59,
+    "arabic": "الْمُبْدِئُ",
+    "transliteration": "Al-Mubdi'",
+    "meaningFr": "Celui qui commence la création"
+  },
+  {
+    "number": 60,
+    "arabic": "الْمُعِيدُ",
+    "transliteration": "Al-Mu'îd",
+    "meaningFr": "Celui qui renouvelle la création"
+  },
+  {
+    "number": 61,
+    "arabic": "الْمُحْيِي",
+    "transliteration": "Al-Muhyî",
+    "meaningFr": "Celui qui donne la vie"
+  },
+  {
+    "number": 62,
+    "arabic": "الْمُمِيتُ",
+    "transliteration": "Al-Mumît",
+    "meaningFr": "Celui qui donne la mort"
+  },
+  {
+    "number": 63,
+    "arabic": "الْحَيُّ",
+    "transliteration": "Al-Hayy",
+    "meaningFr": "Le Vivant, L'Éternel Vivant"
+  },
+  {
+    "number": 64,
+    "arabic": "الْقَيُّومُ",
+    "transliteration": "Al-Qayyûm",
+    "meaningFr": "Celui qui subsiste par Lui-même"
+  },
+  {
+    "number": 65,
+    "arabic": "الْوَاجِدُ",
+    "transliteration": "Al-Wâjid",
+    "meaningFr": "Celui qui trouve tout ce qu'Il veut"
+  },
+  {
+    "number": 66,
+    "arabic": "الْمَاجِدُ",
+    "transliteration": "Al-Mâjid",
+    "meaningFr": "Le Très Illustre, Le Glorieux"
+  },
+  {
+    "number": 67,
+    "arabic": "الْوَاحِدُ",
+    "transliteration": "Al-Wâhid",
+    "meaningFr": "L'Unique"
+  },
+  {
+    "number": 68,
+    "arabic": "الْأَحَدُ",
+    "transliteration": "Al-Ahad",
+    "meaningFr": "L'Un, L'Indivisible"
+  },
+  {
+    "number": 69,
+    "arabic": "الصَّمَدُ",
+    "transliteration": "As-Samad",
+    "meaningFr": "L'Absolu, L'Impénétrable"
+  },
+  {
+    "number": 70,
+    "arabic": "الْقَادِرُ",
+    "transliteration": "Al-Qâdir",
+    "meaningFr": "Le Tout-Puissant"
+  },
+  {
+    "number": 71,
+    "arabic": "الْمُقْتَدِرُ",
+    "transliteration": "Al-Muqtadir",
+    "meaningFr": "L'Omnipotent"
+  },
+  {
+    "number": 72,
+    "arabic": "الْمُقَدِّمُ",
+    "transliteration": "Al-Muqaddim",
+    "meaningFr": "Celui qui avance les choses"
+  },
+  {
+    "number": 73,
+    "arabic": "الْمُؤَخِّرُ",
+    "transliteration": "Al-Mu'akhkhir",
+    "meaningFr": "Celui qui diffère les choses"
+  },
+  {
+    "number": 74,
+    "arabic": "الْأَوَّلُ",
+    "transliteration": "Al-Awwal",
+    "meaningFr": "Le Premier, sans commencement"
+  },
+  {
+    "number": 75,
+    "arabic": "الْآخِرُ",
+    "transliteration": "Al-Âkhir",
+    "meaningFr": "Le Dernier, sans fin"
+  },
+  {
+    "number": 76,
+    "arabic": "الظَّاهِرُ",
+    "transliteration": "Az-Zâhir",
+    "meaningFr": "L'Apparent, au-dessus de tout"
+  },
+  {
+    "number": 77,
+    "arabic": "الْبَاطِنُ",
+    "transliteration": "Al-Bâtin",
+    "meaningFr": "Le Caché, plus proche que tout"
+  },
+  {
+    "number": 78,
+    "arabic": "الْوَالِي",
+    "transliteration": "Al-Wâlî",
+    "meaningFr": "Le Maître Souverain de toutes choses"
+  },
+  {
+    "number": 79,
+    "arabic": "الْمُتَعَالِي",
+    "transliteration": "Al-Muta'âlî",
+    "meaningFr": "Le Très Haut, au-dessus de tout"
+  },
+  {
+    "number": 80,
+    "arabic": "الْبَرُّ",
+    "transliteration": "Al-Barr",
+    "meaningFr": "Le Bienfaiteur, Le Bon"
+  },
+  {
+    "number": 81,
+    "arabic": "التَّوَّابُ",
+    "transliteration": "At-Tawwâb",
+    "meaningFr": "Celui qui agrée le repentir"
+  },
+  {
+    "number": 82,
+    "arabic": "الْمُنْتَقِمُ",
+    "transliteration": "Al-Muntaqim",
+    "meaningFr": "Celui qui punit les injustes"
+  },
+  {
+    "number": 83,
+    "arabic": "الْعَفُوُّ",
+    "transliteration": "Al-'Afuww",
+    "meaningFr": "Celui qui pardonne et efface"
+  },
+  {
+    "number": 84,
+    "arabic": "الرَّؤُوفُ",
+    "transliteration": "Ar-Ra'ûf",
+    "meaningFr": "Le Très Compatissant"
+  },
+  {
+    "number": 85,
+    "arabic": "مَالِكُ الْمُلْكِ",
+    "transliteration": "Mâlik ul-Mulk",
+    "meaningFr": "Le Maître de la Royauté"
+  },
+  {
+    "number": 86,
+    "arabic": "ذُو الْجَلَالِ وَالْإِكْرَامِ",
+    "transliteration": "Dhul-Jalâl wal-Ikrâm",
+    "meaningFr": "Le Maître de la Majesté et de la Générosité"
+  },
+  {
+    "number": 87,
+    "arabic": "الْمُقْسِطُ",
+    "transliteration": "Al-Muqsit",
+    "meaningFr": "L'Équitable"
+  },
+  {
+    "number": 88,
+    "arabic": "الْجَامِعُ",
+    "transliteration": "Al-Jâmi'",
+    "meaningFr": "Celui qui rassemble toute chose"
+  },
+  {
+    "number": 89,
+    "arabic": "الْغَنِيُّ",
+    "transliteration": "Al-Ghanî",
+    "meaningFr": "Le Riche, L'Indépendant"
+  },
+  {
+    "number": 90,
+    "arabic": "الْمُغْنِي",
+    "transliteration": "Al-Mughnî",
+    "meaningFr": "Celui qui enrichit"
+  },
+  {
+    "number": 91,
+    "arabic": "الْمَانِعُ",
+    "transliteration": "Al-Mâni'",
+    "meaningFr": "Celui qui prévient et protège"
+  },
+  {
+    "number": 92,
+    "arabic": "الضَّارُّ",
+    "transliteration": "Ad-Dârr",
+    "meaningFr": "Celui qui afflige par Sa sagesse"
+  },
+  {
+    "number": 93,
+    "arabic": "النَّافِعُ",
+    "transliteration": "An-Nâfi'",
+    "meaningFr": "Celui qui est utile et bienfaisant"
+  },
+  {
+    "number": 94,
+    "arabic": "النُّورُ",
+    "transliteration": "An-Nûr",
+    "meaningFr": "La Lumière"
+  },
+  {
+    "number": 95,
+    "arabic": "الْهَادِي",
+    "transliteration": "Al-Hâdî",
+    "meaningFr": "Le Guide"
+  },
+  {
+    "number": 96,
+    "arabic": "الْبَدِيعُ",
+    "transliteration": "Al-Badî'",
+    "meaningFr": "L'Incomparable Créateur"
+  },
+  {
+    "number": 97,
+    "arabic": "الْبَاقِي",
+    "transliteration": "Al-Bâqî",
+    "meaningFr": "L'Éternel, L'Immuable"
+  },
+  {
+    "number": 98,
+    "arabic": "الْوَارِثُ",
+    "transliteration": "Al-Wârith",
+    "meaningFr": "L'Héritier de toute chose"
+  },
+  {
+    "number": 99,
+    "arabic": "الرَّشِيدُ",
+    "transliteration": "Ar-Rashîd",
+    "meaningFr": "Le Bien Guidé, Celui qui guide bien"
+  }
+]
 
 function apiUrl(path: string) {
   if (path.startsWith('http')) return path
@@ -2535,6 +3148,9 @@ function DuasView({
   onRepeat: (dua: Dua) => void
   onKnown: (duaId: string) => void
 }) {
+  const [mode, setMode] = useState<LibraryMode>('duas')
+  const [allahGroup, setAllahGroup] = useState<AllahNameGroup>('all')
+
   if (loading) return <LoadingState />
   if (error) return <ErrorState message={error} onRetry={onRetry} />
 
@@ -2556,26 +3172,56 @@ function DuasView({
         .includes(normalizedQuery)
     return categoryMatch && memoryMatch && textMatch
   })
+  const filteredAllahNames = allahNames.filter((name) => {
+    const groupMatch =
+      allahGroup === 'all' ||
+      (allahGroup === '1-33' && name.number <= 33) ||
+      (allahGroup === '34-66' && name.number >= 34 && name.number <= 66) ||
+      (allahGroup === '67-99' && name.number >= 67)
+    const textMatch =
+      !normalizedQuery ||
+      [name.number, name.arabic, name.transliteration, name.meaningFr]
+        .join(' ')
+        .toLowerCase()
+        .includes(normalizedQuery)
+    return groupMatch && textMatch
+  })
+
+  const playAllahName = (name: AllahName) => {
+    onPlay({
+      id: `allah-name-${name.number}`,
+      title: name.transliteration,
+      context_label: '99 noms d’Allah',
+      arabic: name.arabic,
+      transliteration: name.transliteration,
+      meaning_fr: name.meaningFr,
+      audio_url_ar: `/stream/allah-names/${name.number}`,
+    })
+  }
 
   return (
     <div className="screen duas-screen">
       <section className="library-intro">
-        <h1>Invocations</h1>
-        <p>Écoute, répète, puis coche quand tu les connais</p>
+        <h1>{mode === 'duas' ? 'Invocations' : '99 noms d’Allah'}</h1>
+        <p>{mode === 'duas' ? 'Écoute, répète, puis coche quand tu les connais' : 'Écoute et découvre les noms sublimes, par groupes de 33'}</p>
       </section>
 
       <div className="mode-switch" role="tablist" aria-label="Bibliothèque">
-        <button className="active" type="button">
+        <button className={mode === 'duas' ? 'active' : ''} type="button" onClick={() => setMode('duas')}>
           Invocations
         </button>
-        <button type="button">
+        <button className={mode === 'allahNames' ? 'active' : ''} type="button" onClick={() => setMode('allahNames')}>
           99 noms d’Allah
         </button>
       </div>
 
       <div className="search-box embedded">
         <Search size={19} />
-        <input value={query} onChange={(event) => onQuery(event.target.value)} placeholder="Rechercher une invocation..." />
+        <input
+          value={query}
+          onChange={(event) => onQuery(event.target.value)}
+          placeholder={mode === 'duas' ? 'Rechercher une invocation...' : 'Rechercher un nom d’Allah...'}
+        />
         {query && (
           <button type="button" onClick={() => onQuery('')} aria-label="Effacer">
             <X size={17} />
@@ -2583,43 +3229,101 @@ function DuasView({
         )}
       </div>
 
-      <div className="chip-rail">
-        {categories.map((item) => (
-          <button className={category === item ? 'active' : ''} type="button" key={item} onClick={() => onCategory(item)}>
-            {item === 'all' ? 'Toutes' : categoryLabel(item)}
-          </button>
-        ))}
-      </div>
+      {mode === 'duas' ? (
+        <>
+          <div className="chip-rail">
+            {categories.map((item) => (
+              <button className={category === item ? 'active' : ''} type="button" key={item} onClick={() => onCategory(item)}>
+                {item === 'all' ? 'Toutes' : categoryLabel(item)}
+              </button>
+            ))}
+          </div>
 
-      <div className="memory-filters">
-        <button className={memoryFilter === 'all' ? 'active' : ''} type="button" onClick={() => onMemoryFilter('all')}>
-          Toutes
-        </button>
-        <button className={memoryFilter === 'known' ? 'active' : ''} type="button" onClick={() => onMemoryFilter('known')}>
-          Connues ({knownDuas.size})
-        </button>
-        <button className={memoryFilter === 'learning' ? 'active' : ''} type="button" onClick={() => onMemoryFilter('learning')}>
-          À apprendre
-        </button>
-      </div>
+          <div className="memory-filters">
+            <button className={memoryFilter === 'all' ? 'active' : ''} type="button" onClick={() => onMemoryFilter('all')}>
+              Toutes
+            </button>
+            <button className={memoryFilter === 'known' ? 'active' : ''} type="button" onClick={() => onMemoryFilter('known')}>
+              Connues ({knownDuas.size})
+            </button>
+            <button className={memoryFilter === 'learning' ? 'active' : ''} type="button" onClick={() => onMemoryFilter('learning')}>
+              À apprendre
+            </button>
+          </div>
 
-      <div className="dua-list">
-        {filtered.map((dua) => (
-          <DuaCard
-            key={dua.id}
-            dua={dua}
-            known={knownDuas.has(dua.id)}
-            playing={duaAudio?.dua.id === dua.id && duaAudio.playing}
-            repeating={duaAudio?.dua.id === dua.id && duaAudio.repeat}
-            onPlay={() => onPlay(dua)}
-            onRepeat={() => onRepeat(dua)}
-            onKnown={() => onKnown(dua.id)}
-          />
-        ))}
-      </div>
+          <div className="dua-list">
+            {filtered.map((dua) => (
+              <DuaCard
+                key={dua.id}
+                dua={dua}
+                known={knownDuas.has(dua.id)}
+                playing={duaAudio?.dua.id === dua.id && duaAudio.playing}
+                repeating={duaAudio?.dua.id === dua.id && duaAudio.repeat}
+                onPlay={() => onPlay(dua)}
+                onRepeat={() => onRepeat(dua)}
+                onKnown={() => onKnown(dua.id)}
+              />
+            ))}
+          </div>
 
-      {filtered.length === 0 && <EmptyState icon={<Search size={28} />} title="Aucun résultat" text="Essaie une autre catégorie ou un autre mot." />}
+          {filtered.length === 0 && <EmptyState icon={<Search size={28} />} title="Aucun résultat" text="Essaie une autre catégorie ou un autre mot." />}
+        </>
+      ) : (
+        <>
+          <div className="chip-rail">
+            {allahNameGroups.map((group) => (
+              <button className={allahGroup === group.id ? 'active' : ''} type="button" key={group.id} onClick={() => setAllahGroup(group.id)}>
+                {group.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="dua-list">
+            {filteredAllahNames.map((name) => {
+              const audioId = `allah-name-${name.number}`
+              return (
+                <AllahNameCard
+                  key={name.number}
+                  name={name}
+                  playing={duaAudio?.dua.id === audioId && duaAudio.playing}
+                  onPlay={() => playAllahName(name)}
+                />
+              )
+            })}
+          </div>
+
+          {filteredAllahNames.length === 0 && <EmptyState icon={<Search size={28} />} title="Aucun résultat" text="Essaie un autre nom ou un autre groupe." />}
+        </>
+      )}
     </div>
+  )
+}
+
+function AllahNameCard({
+  name,
+  playing,
+  onPlay,
+}: {
+  name: AllahName
+  playing?: boolean
+  onPlay: () => void
+}) {
+  return (
+    <article className="dua-card allah-name-card">
+      <div className="dua-card-head">
+        <span>Nom {name.number} / 99</span>
+        <Sparkles size={18} />
+      </div>
+      <p className="arabic-text">{name.arabic}</p>
+      <h2>{name.transliteration}</h2>
+      <p className="meaning">{name.meaningFr}</p>
+      <div className="dua-actions single">
+        <button type="button" onClick={onPlay}>
+          {playing ? <Pause size={16} /> : <Play size={16} />}
+          Écouter
+        </button>
+      </div>
+    </article>
   )
 }
 

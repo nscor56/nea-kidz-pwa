@@ -1447,6 +1447,14 @@ p {
   margin-top: 14px;
 }
 
+.dua-actions.single {
+  grid-template-columns: 1fr;
+}
+
+.allah-name-card .arabic-text {
+  font-size: 34px;
+}
+
 .dua-actions button {
   min-height: 42px;
   display: inline-flex;
