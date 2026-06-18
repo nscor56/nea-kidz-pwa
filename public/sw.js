@@ -1,4 +1,4 @@
-const CACHE_NAME = 'neakidz-pwa2-v3-player-fullscreen'
+const CACHE_NAME = 'neakidz-pwa2-v4-web-push'
 const SHELL_URLS = ['/', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png', '/favicon.ico']
 const CACHEABLE_ORIGINS = ['https://api.neakidz.com']
 
@@ -48,4 +48,40 @@ self.addEventListener('fetch', (event) => {
       }),
     )
   }
+})
+
+self.addEventListener('push', (event) => {
+  let data = {}
+  try {
+    data = event.data ? event.data.json() : {}
+  } catch (_) {
+    data = { body: event.data?.text() }
+  }
+  const title = data.title || 'NEA KIDZ'
+  const options = {
+    body: data.body || 'Une nouveauté vous attend.',
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
+    data: {
+      url: data.url || data.payload?.route || '/',
+      payload: data.payload || {},
+    },
+  }
+  event.waitUntil(self.registration.showNotification(title, options))
+})
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  const targetUrl = new URL(event.notification.data?.url || '/', self.location.origin).href
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      const existing = clients.find((client) => client.url.startsWith(self.location.origin))
+      if (existing) {
+        existing.focus()
+        existing.navigate(targetUrl)
+        return
+      }
+      return self.clients.openWindow(targetUrl)
+    }),
+  )
 })

@@ -62,6 +62,7 @@ const LOGO_FACE = '/nea_kidz_face_light_gold_transparent.png'
 const LOGIN_LOGO = '/nea_kidz_login_logo_gold_dark_trimmed.png'
 const REMEMBERED_EMAIL_KEY = 'neakidz.pwa2.rememberedEmail'
 const NOTIFICATION_PREFS_KEY = 'neakidz.pwa2.notificationPrefs'
+const PUSH_TOKEN_ID_KEY = 'neakidz.pwa2.pushTokenId'
 const APP_VERSION_LABEL = 'pwa2-android-shell-0.4.1'
 const AUDIO_UNLOCK_SRC =
   'data:audio/wav;base64,UklGRiQFAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=='
@@ -1159,6 +1160,42 @@ function notificationPrefsToApi(prefs: NotificationPrefs) {
   }
 }
 
+function urlBase64ToUint8Array(base64String: string) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
+  const base64 = `${base64String}${padding}`.replace(/-/g, '+').replace(/_/g, '/')
+  const rawData = window.atob(base64)
+  const outputArray = new Uint8Array(rawData.length)
+  for (let i = 0; i < rawData.length; i += 1) outputArray[i] = rawData.charCodeAt(i)
+  return outputArray
+}
+
+function stableDeviceId() {
+  const key = 'neakidz.pwa2.deviceId'
+  const current = localStorage.getItem(key)
+  if (current) return current
+  const next = `pwa2_${crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(16).slice(2)}`}`
+  localStorage.setItem(key, next)
+  return next
+}
+
+type WebPushKeyResponse = {
+  publicKey?: string
+}
+
+type PushTokenResponse = {
+  token?: {
+    id?: string
+  }
+}
+
+function pushSubscriptionToken(subscription: PushSubscription) {
+  return JSON.stringify(subscription.toJSON())
+}
+
+type PushManagerWithOptions = PushManager & {
+  subscribe(options: PushSubscriptionOptionsInit): Promise<PushSubscription>
+}
+
 function resolveThemeMode(mode: ThemeMode, systemDark: boolean) {
   return mode === 'system' ? (systemDark ? 'dark' : 'light') : mode
 }
@@ -1792,6 +1829,56 @@ function App() {
       // Cached preferences keep the settings screen usable offline.
     }
   }, [apiFetch, session?.token, setNotificationPrefs])
+
+  const registerWebPushToken = useCallback(async () => {
+    if (!session?.token) return false
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+      setToast('Notifications push non supportées sur ce navigateur.')
+      return false
+    }
+    const permission = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission().catch(() => 'denied')
+    if (permission !== 'granted') {
+      setToast('Autorisation notifications refusée dans le navigateur.')
+      return false
+    }
+    const keyPayload = await apiFetch<WebPushKeyResponse>('/me/web-push-public-key', {}, false)
+    if (!keyPayload.publicKey) {
+      setToast('Notifications Web Push non configurées côté serveur.')
+      return false
+    }
+    const registration = await navigator.serviceWorker.register('/sw.js')
+    const existing = await registration.pushManager.getSubscription()
+    const subscription = existing || await (registration.pushManager as PushManagerWithOptions).subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(keyPayload.publicKey),
+    })
+    const payload = await apiFetch<PushTokenResponse>('/me/push-tokens', {
+      method: 'POST',
+      body: JSON.stringify({
+        token: pushSubscriptionToken(subscription),
+        platform: 'web_push',
+        device_id: stableDeviceId(),
+        app_version: APP_VERSION_LABEL,
+        locale: navigator.language || 'fr-FR',
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Paris',
+      }),
+    })
+    if (payload.token?.id) localStorage.setItem(PUSH_TOKEN_ID_KEY, payload.token.id)
+    return true
+  }, [apiFetch, session?.token])
+
+  const revokeWebPushToken = useCallback(async () => {
+    const tokenId = localStorage.getItem(PUSH_TOKEN_ID_KEY)
+    if (tokenId) {
+      await apiFetch(`/me/push-tokens/${encodeURIComponent(tokenId)}`, { method: 'DELETE' }).catch(() => undefined)
+      localStorage.removeItem(PUSH_TOKEN_ID_KEY)
+    }
+    if ('serviceWorker' in navigator) {
+      const registration = await navigator.serviceWorker.getRegistration('/sw.js')
+      const subscription = await registration?.pushManager.getSubscription()
+      await subscription?.unsubscribe().catch(() => false)
+    }
+  }, [apiFetch])
 
   const loadEpisodeStream = useCallback(
     async (episode: Episode): Promise<EpisodeStream> => {
@@ -2649,18 +2736,26 @@ function App() {
             onThemeMode={setThemeMode}
             onTextScale={setTextScale}
             onNotificationPrefs={async (next) => {
-              if (next.enabled && 'Notification' in window && Notification.permission === 'default') {
-                await Notification.requestPermission().catch(() => 'denied')
-              }
-              setNotificationPrefs(next)
+              setNetworkBusy(true)
+              const effectiveNext = { ...next }
               try {
+                if (next.enabled) {
+                  const registered = await registerWebPushToken()
+                  if (!registered) effectiveNext.enabled = false
+                } else {
+                  await revokeWebPushToken()
+                }
+                setNotificationPrefs(effectiveNext)
                 const payload = await apiFetch<NotificationPrefsResponse>('/me/notification-preferences', {
                   method: 'PUT',
-                  body: JSON.stringify(notificationPrefsToApi(next)),
+                  body: JSON.stringify(notificationPrefsToApi(effectiveNext)),
                 })
                 setNotificationPrefs(notificationPrefsFromApi(payload))
+                setToast(effectiveNext.enabled ? 'Notifications synchronisées.' : 'Notifications désactivées.')
               } catch {
                 setToast('Préférences enregistrées sur cet appareil. Synchronisation à réessayer.')
+              } finally {
+                setNetworkBusy(false)
               }
             }}
           />
