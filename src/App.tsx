@@ -62,7 +62,7 @@ const LOGO_FACE = '/nea_kidz_face_light_gold_transparent.png'
 const LOGIN_LOGO = '/nea_kidz_login_logo_gold_dark_trimmed.png'
 const REMEMBERED_EMAIL_KEY = 'neakidz.pwa2.rememberedEmail'
 const NOTIFICATION_PREFS_KEY = 'neakidz.pwa2.notificationPrefs'
-const APP_VERSION_LABEL = 'pwa2-android-shell-0.4.0'
+const APP_VERSION_LABEL = 'pwa2-android-shell-0.4.1'
 const AUDIO_UNLOCK_SRC =
   'data:audio/wav;base64,UklGRiQFAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=='
 const PAYWALL_PREVIEW_ROWS = [
@@ -124,6 +124,20 @@ type NotificationPrefs = {
   newStoriesEnabled: boolean
   bedtimeEnabled: boolean
   bedtimeTime: string
+}
+
+type NotificationPrefsResponse = {
+  preferences?: {
+    enabled?: boolean
+    master_enabled?: boolean
+    new_stories_enabled?: boolean
+    new_episodes_enabled?: boolean
+    bedtime_enabled?: boolean
+    reminders_enabled?: boolean
+    bedtime_time?: string
+    evening_reminder_time?: string
+    permission_status?: string
+  }
 }
 
 type Session = {
@@ -483,6 +497,33 @@ function loadNotificationPrefs(): NotificationPrefs {
     }
   } catch {
     return { enabled: false, newStoriesEnabled: false, bedtimeEnabled: false, bedtimeTime: '20:30' }
+  }
+}
+
+function notificationPrefsFromApi(payload: NotificationPrefsResponse): NotificationPrefs {
+  const prefs = payload.preferences || {}
+  return {
+    enabled: Boolean(prefs.enabled ?? prefs.master_enabled),
+    newStoriesEnabled: Boolean(prefs.new_stories_enabled ?? prefs.new_episodes_enabled),
+    bedtimeEnabled: Boolean(prefs.bedtime_enabled ?? prefs.reminders_enabled),
+    bedtimeTime: typeof prefs.bedtime_time === 'string'
+      ? prefs.bedtime_time.slice(0, 5)
+      : typeof prefs.evening_reminder_time === 'string'
+        ? prefs.evening_reminder_time.slice(0, 5)
+        : '20:30',
+  }
+}
+
+function notificationPrefsToApi(prefs: NotificationPrefs) {
+  return {
+    enabled: prefs.enabled,
+    master_enabled: prefs.enabled,
+    new_stories_enabled: prefs.newStoriesEnabled,
+    bedtime_enabled: prefs.bedtimeEnabled,
+    bedtime_time: prefs.bedtimeTime,
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Paris',
+    locale: navigator.language || 'fr-FR',
+    permission_status: 'Notification' in window ? Notification.permission : 'unsupported',
   }
 }
 
@@ -1074,6 +1115,16 @@ function App() {
     }
   }, [apiFetch, session?.token])
 
+  const loadRemoteNotificationPrefs = useCallback(async () => {
+    if (!session?.token) return
+    try {
+      const payload = await apiFetch<NotificationPrefsResponse>('/me/notification-preferences')
+      setNotificationPrefs(notificationPrefsFromApi(payload))
+    } catch {
+      // Cached preferences keep the settings screen usable offline.
+    }
+  }, [apiFetch, session?.token, setNotificationPrefs])
+
   const loadEpisodeStream = useCallback(
     async (episode: Episode): Promise<EpisodeStream> => {
       const cached = streamCacheRef.current.get(episode.id)
@@ -1114,7 +1165,8 @@ function App() {
     loadCatalog()
     loadDuas()
     loadProfileHistory()
-  }, [loadCatalog, loadDuas, loadProfileHistory, session?.token])
+    loadRemoteNotificationPrefs()
+  }, [loadCatalog, loadDuas, loadProfileHistory, loadRemoteNotificationPrefs, session?.token])
 
   useEffect(() => {
     if (session?.token) refreshMe()
@@ -1860,6 +1912,7 @@ function App() {
               loadCatalog()
               loadDuas()
               loadProfileHistory()
+              loadRemoteNotificationPrefs()
               refreshMe()
             }}
             onDownloads={() => setToast('Histoires hors-ligne bientôt disponibles sur la PWA.')}
@@ -1875,6 +1928,15 @@ function App() {
                 await Notification.requestPermission().catch(() => 'denied')
               }
               setNotificationPrefs(next)
+              try {
+                const payload = await apiFetch<NotificationPrefsResponse>('/me/notification-preferences', {
+                  method: 'PUT',
+                  body: JSON.stringify(notificationPrefsToApi(next)),
+                })
+                setNotificationPrefs(notificationPrefsFromApi(payload))
+              } catch {
+                setToast('Préférences enregistrées sur cet appareil. Synchronisation à réessayer.')
+              }
             }}
           />
         )}
