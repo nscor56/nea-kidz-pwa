@@ -63,6 +63,7 @@ const LOGIN_LOGO = '/nea_kidz_login_logo_gold_dark_trimmed.png'
 const REMEMBERED_EMAIL_KEY = 'neakidz.pwa2.rememberedEmail'
 const NOTIFICATION_PREFS_KEY = 'neakidz.pwa2.notificationPrefs'
 const PUSH_TOKEN_ID_KEY = 'neakidz.pwa2.pushTokenId'
+const OFFICIAL_ANDROID_APP_URL = 'https://play.google.com/store/apps/details?id=com.neakidz.app&hl=fr'
 const APP_VERSION_LABEL = 'pwa2-android-shell-0.4.1'
 const AUDIO_UNLOCK_SRC =
   'data:audio/wav;base64,UklGRiQFAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=='
@@ -1178,6 +1179,15 @@ function stableDeviceId() {
   return next
 }
 
+function isCrawlerUserAgent(userAgent: string) {
+  return /bot|crawler|spider|googlebot|bingbot|duckduckbot|slurp|facebookexternalhit|whatsapp|telegrambot|linkedinbot/i.test(userAgent)
+}
+
+function isAndroidWebClient() {
+  const ua = navigator.userAgent || ''
+  return /Android/i.test(ua) && !isCrawlerUserAgent(ua)
+}
+
 type WebPushKeyResponse = {
   publicKey?: string
 }
@@ -1591,6 +1601,7 @@ function App() {
   const [textScale, setTextScaleState] = useState<TextScale>(() => loadTextScale())
   const [settingsPanel, setSettingsPanel] = useState<SettingsPanel>('main')
   const [notificationPrefs, setNotificationPrefsState] = useState<NotificationPrefs>(() => loadNotificationPrefs())
+  const shouldRedirectAndroid = isAndroidWebClient()
 
   const saveSession = useCallback((next: Session | null) => {
     setSession(next)
@@ -2537,6 +2548,10 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [player])
 
+  if (shouldRedirectAndroid) {
+    return <AndroidPlayStoreRedirect />
+  }
+
   return (
     <main className={view === 'player' ? 'app-shell player-shell' : 'app-shell'}>
       <audio
@@ -2908,6 +2923,28 @@ function AppHeader({
         <span className="header-icon-placeholder" />
       )}
     </header>
+  )
+}
+
+function AndroidPlayStoreRedirect() {
+  useEffect(() => {
+    window.location.replace(OFFICIAL_ANDROID_APP_URL)
+  }, [])
+
+  return (
+    <main className="android-play-redirect" aria-label="Redirection vers l'application Android officielle NEA KIDZ">
+      <div className="android-play-redirect-card">
+        <div className="android-play-redirect-icon">
+          <Smartphone size={34} />
+        </div>
+        <img src={LOGIN_LOGO} alt="NEA KIDZ" />
+        <h1>NEA KIDZ est disponible sur Android</h1>
+        <p>L'expérience web est réservée à iOS et ordinateur. Sur Android, utilise l'application officielle NEA KIDZ depuis Google Play.</p>
+        <a href={OFFICIAL_ANDROID_APP_URL} rel="noreferrer">
+          Ouvrir Google Play
+        </a>
+      </div>
+    </main>
   )
 }
 

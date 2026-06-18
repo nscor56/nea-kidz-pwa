@@ -236,6 +236,73 @@ p {
   min-height: calc(100dvh - 160px);
 }
 
+.android-play-redirect {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at top, rgba(202, 155, 70, 0.2), transparent 34%),
+    linear-gradient(180deg, var(--cream) 0%, #f6ead6 100%);
+}
+
+.android-play-redirect-card {
+  width: min(430px, 100%);
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  padding: 30px 24px;
+  border: 1px solid rgba(159, 111, 20, 0.24);
+  border-radius: 30px;
+  background: rgba(255, 250, 242, 0.96);
+  box-shadow: 0 24px 60px rgba(83, 57, 23, 0.18);
+  text-align: center;
+  color: var(--text);
+}
+
+.android-play-redirect-icon {
+  width: 66px;
+  height: 66px;
+  display: grid;
+  place-items: center;
+  border-radius: 22px;
+  background: rgba(159, 111, 20, 0.14);
+  color: var(--gold);
+}
+
+.android-play-redirect-card img {
+  width: min(190px, 70%);
+  height: auto;
+}
+
+.android-play-redirect-card h1 {
+  margin: 4px 0 0;
+  font-family: var(--font-title);
+  font-size: clamp(24px, 7vw, 34px);
+  line-height: 1.05;
+}
+
+.android-play-redirect-card p {
+  max-width: 330px;
+  color: var(--text-secondary);
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.android-play-redirect-card a {
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 22px;
+  border-radius: 999px;
+  background: var(--gold);
+  color: var(--white);
+  font-weight: 900;
+  text-decoration: none;
+  box-shadow: 0 12px 24px rgba(159, 111, 20, 0.24);
+}
+
 .screen {
   padding: 10px 18px 28px;
 }
