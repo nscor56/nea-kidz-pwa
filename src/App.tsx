@@ -61,6 +61,8 @@ const TEXT_SCALE_KEY = 'neakidz.pwa2.textScale'
 const LOGO_FACE = '/nea_kidz_face_light_gold_transparent.png'
 const LOGIN_LOGO = '/nea_kidz_login_logo_gold_dark_trimmed.png'
 const REMEMBERED_EMAIL_KEY = 'neakidz.pwa2.rememberedEmail'
+const NOTIFICATION_PREFS_KEY = 'neakidz.pwa2.notificationPrefs'
+const APP_VERSION_LABEL = 'pwa2-android-shell-0.4.0'
 const AUDIO_UNLOCK_SRC =
   'data:audio/wav;base64,UklGRiQFAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=='
 const PAYWALL_PREVIEW_ROWS = [
@@ -110,10 +112,18 @@ type Plan = 'monthly' | 'yearly'
 type DuaMemoryFilter = 'all' | 'known' | 'learning'
 type ThemeMode = 'light' | 'dark' | 'system'
 type TextScale = 0.9 | 1 | 1.2
+type SettingsPanel = 'main' | 'display' | 'notifications'
 type OnboardingValues = {
   usageContext: string
   listenerAgeGroup: string
   listeningMoment: string
+}
+
+type NotificationPrefs = {
+  enabled: boolean
+  newStoriesEnabled: boolean
+  bedtimeEnabled: boolean
+  bedtimeTime: string
 }
 
 type Session = {
@@ -296,6 +306,33 @@ type SearchResult = {
   episodes: Episode[]
 }
 
+type HistoryItem = {
+  episodeId: string
+  title: string
+  collectionId: string
+  collectionName: string
+  progress: number
+  duration: number
+  completed: boolean
+  updatedAt?: string
+}
+
+type ProfileStats = {
+  listenedCount: number
+  totalStories: number
+  progressPercent: number
+  completedCollections: number
+  activeCollections: number
+  hasListening: boolean
+  collectionProgress: Array<{
+    id: string
+    name: string
+    listened: number
+    total: number
+    percent: number
+  }>
+}
+
 type PlayerState = {
   episode: Episode
   collection?: Collection
@@ -432,6 +469,21 @@ function loadTextScale(): TextScale {
     // Android defaults to the medium scale.
   }
   return 1
+}
+
+function loadNotificationPrefs(): NotificationPrefs {
+  try {
+    const raw = localStorage.getItem(NOTIFICATION_PREFS_KEY)
+    const parsed = raw ? JSON.parse(raw) : null
+    return {
+      enabled: Boolean(parsed?.enabled),
+      newStoriesEnabled: Boolean(parsed?.newStoriesEnabled),
+      bedtimeEnabled: Boolean(parsed?.bedtimeEnabled),
+      bedtimeTime: typeof parsed?.bedtimeTime === 'string' ? parsed.bedtimeTime : '20:30',
+    }
+  } catch {
+    return { enabled: false, newStoriesEnabled: false, bedtimeEnabled: false, bedtimeTime: '20:30' }
+  }
 }
 
 function resolveThemeMode(mode: ThemeMode, systemDark: boolean) {
@@ -698,6 +750,53 @@ function isPremiumUser(user: User | null) {
   return expiresMs === null || expiresMs > Date.now()
 }
 
+function profilePlanLabel(user: User | null, premium: boolean) {
+  if (!premium) return 'Compte gratuit'
+  const plan = user?.plan || user?.subscription?.plan || null
+  return `Abonné premium ${planLabel(plan).toLowerCase()}`
+}
+
+function profileValidityLabel(user: User | null, premium: boolean) {
+  if (!premium) return 'Débloquez toutes les histoires NEA KIDZ.'
+  const expiry = parseEntitlementDate(user?.premium_until ?? user?.premiumUntil ?? user?.expires_at ?? user?.expiresAt ?? user?.subscription?.expiresAt ?? user?.subscription?.expires_at)
+  if (!expiry) return 'Abonnement premium actif'
+  const date = new Intl.DateTimeFormat('fr-FR').format(new Date(expiry))
+  if (expiry < Date.now()) return `Abonnement expiré le ${date}`
+  return `Votre abonnement expire le ${date}`
+}
+
+function buildProfileStats(history: HistoryItem[], collections: Collection[]): ProfileStats {
+  const listenedIds = new Set(history.map((item) => item.episodeId).filter(Boolean))
+  const totalStories = collections.reduce((count, collection) => count + collection.episodes.length, 0)
+  const collectionProgress = collections
+    .map((collection) => {
+      const total = collection.episodes.length
+      const listened = collection.episodes.filter((episode) => listenedIds.has(episode.id)).length
+      return {
+        id: collection.id,
+        name: collection.name,
+        listened,
+        total,
+        percent: total > 0 ? Math.round((listened / total) * 100) : 0,
+      }
+    })
+    .filter((item) => item.listened > 0)
+    .sort((a, b) => b.listened - a.listened || b.percent - a.percent || a.name.localeCompare(b.name, 'fr'))
+
+  const completedCollections = collectionProgress.filter((item) => item.total > 0 && item.listened >= item.total).length
+  const activeCollections = collectionProgress.filter((item) => item.listened > 0 && item.listened < item.total).length
+
+  return {
+    listenedCount: listenedIds.size,
+    totalStories,
+    progressPercent: totalStories > 0 ? Math.round((listenedIds.size / totalStories) * 100) : 0,
+    completedCollections,
+    activeCollections,
+    hasListening: listenedIds.size > 0,
+    collectionProgress,
+  }
+}
+
 function needsOnboarding(user: User | null) {
   if (!user) return false
   const explicit = user.onboarding_required ?? user.onboardingRequired
@@ -730,15 +829,6 @@ function userWithCompletedOnboarding(user: User | null, values?: Partial<Onboard
   }
 }
 
-function providerLabel(provider?: string | null) {
-  const normalized = String(provider || '').trim().toLowerCase()
-  if (normalized === 'stripe') return 'Stripe Web'
-  if (normalized === 'google' || normalized === 'google_play') return 'Google Play'
-  if (normalized === 'apple') return 'Apple'
-  if (normalized === 'promo') return 'Offre promo'
-  return 'Compte NEA KIDZ'
-}
-
 function activeTabFor(view: View): MainTab {
   if (view === 'duas') return 'duas'
   if (view === 'search') return 'search'
@@ -757,6 +847,8 @@ function App() {
   const [user, setUser] = useState<User | null>(null)
   const [catalog, setCatalog] = useState<Catalog | null>(null)
   const [homeContent, setHomeContent] = useState<HomeContent | null>(null)
+  const [profileHistory, setProfileHistory] = useState<HistoryItem[]>([])
+  const [loadingProfileHistory, setLoadingProfileHistory] = useState(false)
   const [catalogError, setCatalogError] = useState('')
   const [loadingCatalog, setLoadingCatalog] = useState(true)
   const [checkingAccount, setCheckingAccount] = useState(Boolean(session?.token))
@@ -785,6 +877,8 @@ function App() {
   const [themeMode, setThemeModeState] = useState<ThemeMode>(() => loadThemeMode())
   const [systemDark, setSystemDark] = useState(() => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false)
   const [textScale, setTextScaleState] = useState<TextScale>(() => loadTextScale())
+  const [settingsPanel, setSettingsPanel] = useState<SettingsPanel>('main')
+  const [notificationPrefs, setNotificationPrefsState] = useState<NotificationPrefs>(() => loadNotificationPrefs())
 
   const saveSession = useCallback((next: Session | null) => {
     setSession(next)
@@ -802,11 +896,17 @@ function App() {
     localStorage.setItem(TEXT_SCALE_KEY, String(scale))
   }, [])
 
+  const setNotificationPrefs = useCallback((prefs: NotificationPrefs) => {
+    setNotificationPrefsState(prefs)
+    localStorage.setItem(NOTIFICATION_PREFS_KEY, JSON.stringify(prefs))
+  }, [])
+
   const logout = useCallback(() => {
     saveSession(null)
     setUser(null)
     setCatalog(null)
     setHomeContent(null)
+    setProfileHistory([])
     setPlayer(null)
     setPlayerTargetEpisodeId(null)
     streamCacheRef.current.clear()
@@ -815,6 +915,7 @@ function App() {
     onboardingStartedRef.current = false
     audioRef.current?.pause()
     duaAudioRef.current?.pause()
+    setSettingsPanel('main')
     setView('auth')
     setToast('Session fermée.')
   }, [saveSession])
@@ -960,6 +1061,19 @@ function App() {
     }
   }, [apiFetch])
 
+  const loadProfileHistory = useCallback(async () => {
+    if (!session?.token) return
+    setLoadingProfileHistory(true)
+    try {
+      const data = await apiFetch<HistoryItem[]>('/user/history?limit=200')
+      setProfileHistory(data)
+    } catch {
+      setProfileHistory([])
+    } finally {
+      setLoadingProfileHistory(false)
+    }
+  }, [apiFetch, session?.token])
+
   const loadEpisodeStream = useCallback(
     async (episode: Episode): Promise<EpisodeStream> => {
       const cached = streamCacheRef.current.get(episode.id)
@@ -990,14 +1104,17 @@ function App() {
   useEffect(() => {
     if (!session?.token) {
       setHomeContent(null)
+      setProfileHistory([])
       setLoadingCatalog(false)
       setLoadingDuas(false)
+      setLoadingProfileHistory(false)
       setCheckingAccount(false)
       return
     }
     loadCatalog()
     loadDuas()
-  }, [loadCatalog, loadDuas, session?.token])
+    loadProfileHistory()
+  }, [loadCatalog, loadDuas, loadProfileHistory, session?.token])
 
   useEffect(() => {
     if (session?.token) refreshMe()
@@ -1127,6 +1244,7 @@ function App() {
     (premium ? homeContinueEpisode : homeContinueEpisode?.isFree ? homeContinueEpisode : freeCollection?.episodes[0]) ||
     allEpisodes.find((episode) => episode.isFree) ||
     allEpisodes[0]
+  const profileStats = useMemo(() => buildProfileStats(profileHistory, allCollections), [allCollections, profileHistory])
   const fullPlayerEpisode = useMemo(
     () => player?.episode || allEpisodes.find((episode) => episode.id === playerTargetEpisodeId) || selectedEpisode || featuredEpisode || null,
     [allEpisodes, featuredEpisode, player?.episode, playerTargetEpisodeId, selectedEpisode],
@@ -1584,18 +1702,22 @@ function App() {
         onPause={() => duaAudio && setDuaAudio({ ...duaAudio, playing: false })}
       />
 
-      {showTopMiniPlayer && player ? (
+      {showTopMiniPlayer && player && (
         <MiniPlayerTop player={player} onToggle={togglePlayback} onPrevious={() => playAdjacentEpisode(-1)} onNext={() => playAdjacentEpisode(1)} onClose={closePlayer} />
-      ) : !standaloneView ? (
+      )}
+      {!standaloneView && view !== 'settings' && (!showTopMiniPlayer || view === 'profile') ? (
         <AppHeader
           variant={view === 'home' || view === 'duas' || view === 'search' ? 'root' : 'detail'}
-          showRight={view !== 'profile' && view !== 'settings'}
+          showRight={view !== 'profile'}
           onBack={() => setView('home')}
           onHome={() => setView('home')}
           onProfile={() => {
             setView('profile')
           }}
-          onSettings={() => setView('settings')}
+          onSettings={() => {
+            setSettingsPanel('main')
+            setView('settings')
+          }}
         />
       ) : null}
 
@@ -1704,6 +1826,8 @@ function App() {
             user={user}
             premium={premium}
             busy={networkBusy}
+            stats={profileStats}
+            historyLoading={loadingProfileHistory}
             onLogin={() => {
               setAuthMode('login')
               setView('auth')
@@ -1711,25 +1835,47 @@ function App() {
             onLogout={logout}
             onPortal={openPortal}
             onPaywall={() => promptPaywall()}
-            onRefresh={refreshMe}
+            onOpenCollection={openCollection}
+            onRefresh={() => {
+              refreshMe()
+              loadProfileHistory()
+            }}
           />
         )}
         {!accountPending && view === 'settings' && (
           <SettingsView
+            panel={settingsPanel}
             installable={Boolean(installPrompt)}
             busy={networkBusy}
             themeMode={themeMode}
             textScale={textScale}
+            notificationPrefs={notificationPrefs}
+            onPanel={setSettingsPanel}
+            onBack={() => {
+              if (settingsPanel === 'main') setView('home')
+              else setSettingsPanel('main')
+            }}
             onInstall={installPwa}
             onRefresh={() => {
               loadCatalog()
               loadDuas()
+              loadProfileHistory()
               refreshMe()
             }}
-            onProfile={() => setView(user ? 'profile' : 'auth')}
+            onDownloads={() => setToast('Histoires hors-ligne bientôt disponibles sur la PWA.')}
+            onPlaylists={() => setToast('Playlists bientôt disponibles sur la PWA.')}
+            onContact={() => {
+              window.location.href = 'mailto:contact@neakidz.com?subject=Contact%20NEA%20KIDZ'
+            }}
             onPreferences={() => setView('onboarding')}
             onThemeMode={setThemeMode}
             onTextScale={setTextScale}
+            onNotificationPrefs={async (next) => {
+              if (next.enabled && 'Notification' in window && Notification.permission === 'default') {
+                await Notification.requestPermission().catch(() => 'denied')
+              }
+              setNotificationPrefs(next)
+            }}
           />
         )}
         {!accountPending && view === 'paywall' && (
@@ -2642,19 +2788,25 @@ function ProfileView({
   user,
   premium,
   busy,
+  stats,
+  historyLoading,
   onLogin,
   onLogout,
   onPortal,
   onPaywall,
+  onOpenCollection,
   onRefresh,
 }: {
   user: User | null
   premium: boolean
   busy: boolean
+  stats: ProfileStats
+  historyLoading: boolean
   onLogin: () => void
   onLogout: () => void
   onPortal: () => void
   onPaywall: () => void
+  onOpenCollection: (id: string) => void
   onRefresh: () => void
 }) {
   if (!user) {
@@ -2674,122 +2826,291 @@ function ProfileView({
     )
   }
 
-  const status = user.subscriptionStatus || user.subscription_status || user.subscription?.status || (premium ? 'active' : 'free')
-  const plan = user.plan || user.subscription?.plan || null
-  const provider = user.provider || user.subscription?.provider || null
   return (
     <div className="screen profile-screen">
-      <section className="profile-panel">
-        <div className="avatar">{user.name?.[0]?.toUpperCase() || 'N'}</div>
-        <h1>{user.name || 'Famille NEA KIDZ'}</h1>
-        <p>{user.email}</p>
-        <span className={premium ? 'status-pill' : 'status-pill muted'}>
-          {premium ? <BadgeCheck size={14} /> : <Gift size={14} />}
-          {premium ? `${planLabel(plan)} actif` : 'Compte gratuit'}
-        </span>
-      </section>
-      <div className="settings-list">
-        <div className="settings-row">
-          <ShieldCheck size={20} />
-          <div>
-            <strong>Statut</strong>
-            <span>{status}</span>
-          </div>
-        </div>
-        <div className="settings-row">
-          <CreditCard size={20} />
-          <div>
-            <strong>Provider</strong>
-            <span>{providerLabel(provider)}</span>
-          </div>
-        </div>
-        {premium && String(provider || '').trim().toLowerCase() === 'stripe' && (
-          <button className="settings-row action-row" type="button" onClick={onPortal} disabled={busy}>
-            <CreditCard size={20} />
-            <div>
-              <strong>Gérer Stripe</strong>
-              <span>Facturation et résiliation</span>
-            </div>
-            <ChevronRight size={18} />
-          </button>
-        )}
-        {!premium && (
-          <button className="settings-row action-row" type="button" onClick={onPaywall}>
-            <Crown size={20} />
-            <div>
-              <strong>Passer premium</strong>
-              <span>Mensuel ou annuel</span>
-            </div>
-            <ChevronRight size={18} />
-          </button>
-        )}
-        <button className="settings-row action-row" type="button" onClick={onRefresh}>
-          <RefreshCcw size={20} />
-          <div>
-            <strong>Actualiser</strong>
-            <span>Synchroniser le compte</span>
-          </div>
+      {premium ? (
+        <button className="profile-subscription-card premium" type="button" onClick={onPortal} disabled={busy}>
+          <BadgeCheck size={22} />
+          <span>
+            <strong>{profilePlanLabel(user, premium)}</strong>
+            <small>{user.email}</small>
+            <em>{profileValidityLabel(user, premium)}</em>
+          </span>
           <ChevronRight size={18} />
         </button>
-        <button className="settings-row action-row danger" type="button" onClick={onLogout}>
-          <LogOut size={20} />
-          <div>
-            <strong>Déconnexion</strong>
-            <span>Fermer la session</span>
-          </div>
+      ) : (
+        <button className="profile-subscription-card upgrade" type="button" onClick={onPaywall}>
+          <Gift size={30} />
+          <span>
+            <strong>Passez Premium</strong>
+            <small>Toutes nos histoires et fonctionnalités sans publicité.</small>
+            <em>7 jours d’essai offerts.</em>
+          </span>
         </button>
-      </div>
+      )}
+
+      <ProfileStatsCard stats={stats} loading={historyLoading} onOpenCollection={onOpenCollection} onRefresh={onRefresh} />
+      <SocialSupportCard />
+      <button className="profile-logout" type="button" onClick={onLogout}>
+        <LogOut size={18} />
+        Déconnexion
+      </button>
     </div>
   )
 }
 
+function ProfileStatsCard({
+  stats,
+  loading,
+  onOpenCollection,
+  onRefresh,
+}: {
+  stats: ProfileStats
+  loading: boolean
+  onOpenCollection: (id: string) => void
+  onRefresh: () => void
+}) {
+  const collections = stats.collectionProgress.slice(0, 4)
+  return (
+    <section className="profile-stats-card">
+      <header>
+        <span className="profile-stats-icon">
+          <UserRound size={24} />
+        </span>
+        <div>
+          <h1>Mon parcours NEA</h1>
+          <p>Collections et histoires explorées.</p>
+        </div>
+        {loading && <Loader2 size={16} />}
+      </header>
+
+      {stats.hasListening ? (
+        <>
+          <div className="profile-metrics">
+            <ProfileMetric icon={<Play size={18} />} value={String(stats.listenedCount)} label={`histoire${stats.listenedCount > 1 ? 's' : ''} écoutée${stats.listenedCount > 1 ? 's' : ''}`} />
+            <ProfileMetric icon={<Sparkles size={18} />} value={`${stats.progressPercent}%`} label="du catalogue exploré" />
+            <ProfileMetric icon={<BadgeCheck size={18} />} value={String(stats.completedCollections || stats.activeCollections)} label={stats.completedCollections > 0 ? 'collections terminées' : 'collections en cours'} />
+          </div>
+          {collections.length > 0 && (
+            <div className="profile-continue">
+              <div className="profile-continue-heading">
+                <span><RefreshCcw size={18} /></span>
+                <div>
+                  <strong>À continuer</strong>
+                  <small>Reprenez votre exploration.</small>
+                </div>
+              </div>
+              <div className="profile-progress-list">
+                {collections.map((collection) => (
+                  <button className="profile-progress-row" type="button" key={collection.id} onClick={() => onOpenCollection(collection.id)}>
+                    <span className="profile-progress-icon"><Headphones size={18} /></span>
+                    <span className="profile-progress-copy">
+                      <strong>{collection.name}</strong>
+                      <small>{collection.listened}/{collection.total} écoutées · {collection.percent}%</small>
+                      <i aria-hidden="true"><b style={{ width: `${collection.percent}%` }} /></i>
+                    </span>
+                    <em>Continuer</em>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      ) : (
+        <button className="profile-journey-start" type="button" onClick={onRefresh}>
+          <span><Play size={26} /></span>
+          <div>
+            <strong>Votre parcours commence ici</strong>
+            <small>Lancez une première histoire et créez votre premier moment sans écran.</small>
+          </div>
+          <ChevronRight size={20} />
+        </button>
+      )}
+    </section>
+  )
+}
+
+function ProfileMetric({ icon, value, label }: { icon: ReactNode; value: string; label: string }) {
+  return (
+    <div className="profile-metric">
+      <span>{icon}</span>
+      <strong>{value}</strong>
+      <small>{label}</small>
+    </div>
+  )
+}
+
+function SocialSupportCard() {
+  const open = (url: string) => window.open(url, '_blank', 'noopener,noreferrer')
+  return (
+    <section className="social-support-card">
+      <header>
+        <span><UserRound size={22} /></span>
+        <div>
+          <h2>Rejoignez la famille NEA KIDZ</h2>
+          <p>Nouveautés, coulisses et contenus pour parents musulmans.</p>
+        </div>
+      </header>
+      <div className="social-tile-grid">
+        <button type="button" className="instagram" onClick={() => open('https://www.instagram.com/neakidz_fr/')}>
+          <CameraIcon />
+          Instagram
+          <ChevronRight size={14} />
+        </button>
+        <button type="button" className="tiktok" onClick={() => open('https://www.tiktok.com/@neakidz')}>
+          <MusicIcon />
+          TikTok
+          <ChevronRight size={14} />
+        </button>
+        <button type="button" className="youtube" onClick={() => open('https://www.youtube.com/@NEAKIDZ/featured')}>
+          <Play size={16} />
+          YouTube
+          <ChevronRight size={14} />
+        </button>
+        <button type="button" className="facebook" onClick={() => open('https://www.facebook.com/p/NEA-KIDZ-61587228125791/')}>
+          <UserRound size={16} />
+          Facebook
+          <ChevronRight size={14} />
+        </button>
+      </div>
+    </section>
+  )
+}
+
+function CameraIcon() {
+  return <span className="social-dot" aria-hidden="true">◎</span>
+}
+
+function MusicIcon() {
+  return <span className="social-dot" aria-hidden="true">♪</span>
+}
+
 function SettingsView({
+  panel,
   installable,
   busy,
   themeMode,
   textScale,
+  notificationPrefs,
+  onPanel,
+  onBack,
   onInstall,
   onRefresh,
-  onProfile,
+  onDownloads,
+  onPlaylists,
+  onContact,
   onPreferences,
   onThemeMode,
   onTextScale,
+  onNotificationPrefs,
 }: {
+  panel: SettingsPanel
   installable: boolean
   busy: boolean
   themeMode: ThemeMode
   textScale: TextScale
+  notificationPrefs: NotificationPrefs
+  onPanel: (panel: SettingsPanel) => void
+  onBack: () => void
   onInstall: () => void
   onRefresh: () => void
-  onProfile: () => void
+  onDownloads: () => void
+  onPlaylists: () => void
+  onContact: () => void
   onPreferences: () => void
   onThemeMode: (mode: ThemeMode) => void
   onTextScale: (scale: TextScale) => void
+  onNotificationPrefs: (prefs: NotificationPrefs) => void | Promise<void>
 }) {
+  if (panel === 'display') {
+    return (
+      <div className="screen settings-screen">
+        <SettingsTopBar title="Affichage" onBack={onBack} />
+        <AppearanceAccessibilityCard
+          themeMode={themeMode}
+          textScale={textScale}
+          onThemeMode={onThemeMode}
+          onTextScale={onTextScale}
+        />
+      </div>
+    )
+  }
+
+  if (panel === 'notifications') {
+    return (
+      <div className="screen settings-screen">
+        <SettingsTopBar title="Notifications" onBack={onBack} />
+        <NotificationSettingsPanel prefs={notificationPrefs} onPrefs={onNotificationPrefs} />
+      </div>
+    )
+  }
+
   return (
-    <div className="screen">
-      <section className="settings-title">
-        <h1>Réglages</h1>
-      </section>
-      <SettingsSection title="Compte">
+    <div className="screen settings-screen">
+      <SettingsTopBar title="Réglages" onBack={onBack} />
+      <SettingsSection title="Écoute">
         <div className="settings-list">
-          <button className="settings-row action-row" type="button" onClick={onProfile}>
-            <UserCircle size={20} />
+          <button className="settings-row action-row" type="button" onClick={onDownloads}>
+            <DownloadIcon />
             <div>
-              <strong>Profil</strong>
-              <span>Compte et abonnement</span>
+              <strong>Histoires hors-ligne</strong>
+              <span>Gérer les histoires téléchargées</span>
+            </div>
+            <ChevronRight size={18} />
+          </button>
+          <button className="settings-row action-row" type="button" onClick={onPlaylists}>
+            <BookOpen size={20} />
+            <div>
+              <strong>Playlists</strong>
+              <span>Retrouver les sélections de la famille</span>
             </div>
             <ChevronRight size={18} />
           </button>
         </div>
       </SettingsSection>
-      <SettingsSection title="Écoute">
+      <SettingsSection title="Expérience">
         <div className="settings-list">
+          <button className="settings-row action-row" type="button" onClick={() => onPanel('display')}>
+            <Palette size={20} />
+            <div>
+              <strong>Affichage</strong>
+              <span>Accessibilité et apparence</span>
+            </div>
+            <ChevronRight size={18} />
+          </button>
+          <button className="settings-row action-row" type="button" onClick={() => onPanel('notifications')}>
+            <Bell size={20} />
+            <div>
+              <strong>Notifications</strong>
+              <span>Rappels du soir et nouvelles histoires</span>
+            </div>
+            <ChevronRight size={18} />
+          </button>
+          <button className="settings-row action-row" type="button" onClick={onPreferences}>
+            <Settings size={20} />
+            <div>
+              <strong>Préférences d’écoute</strong>
+              <span>Adapter NEA KIDZ à votre famille</span>
+            </div>
+            <ChevronRight size={18} />
+          </button>
+        </div>
+      </SettingsSection>
+      <SettingsSection title="Assistance">
+        <div className="settings-list">
+          <button className="settings-row action-row" type="button" onClick={onContact}>
+            <Mail size={20} />
+            <div>
+              <strong>Nous contacter</strong>
+              <span>Une question, une remarque, une idée</span>
+            </div>
+            <ChevronRight size={18} />
+          </button>
           <button className="settings-row action-row" type="button" onClick={onRefresh} disabled={busy}>
             <RefreshCcw size={20} />
             <div>
               <strong>Actualiser</strong>
-              <span>Catalogue et invocations</span>
+              <span>Catalogue, compte et parcours</span>
             </div>
             <ChevronRight size={18} />
           </button>
@@ -2805,24 +3126,87 @@ function SettingsView({
           )}
         </div>
       </SettingsSection>
-      <SettingsSection title="Expérience">
-        <div className="settings-list">
-          <button className="settings-row action-row" type="button" onClick={onPreferences}>
-            <Settings size={20} />
-            <div>
-              <strong>Préférences d’écoute</strong>
-              <span>Adapter NEA KIDZ à votre famille</span>
-            </div>
-            <ChevronRight size={18} />
-          </button>
-        </div>
-        <AppearanceAccessibilityCard
-          themeMode={themeMode}
-          textScale={textScale}
-          onThemeMode={onThemeMode}
-          onTextScale={onTextScale}
-        />
-      </SettingsSection>
+      <p className="settings-version">Version {APP_VERSION_LABEL}</p>
+    </div>
+  )
+}
+
+function SettingsTopBar({ title, onBack }: { title: string; onBack: () => void }) {
+  return (
+    <div className="settings-topbar">
+      <button type="button" onClick={onBack} aria-label="Retour">
+        <ArrowLeft size={24} />
+      </button>
+      <h1>{title}</h1>
+      <span />
+    </div>
+  )
+}
+
+function DownloadIcon() {
+  return <Headphones size={20} />
+}
+
+function NotificationSettingsPanel({ prefs, onPrefs }: { prefs: NotificationPrefs; onPrefs: (prefs: NotificationPrefs) => void | Promise<void> }) {
+  const update = (next: Partial<NotificationPrefs>) => onPrefs({ ...prefs, ...next })
+  return (
+    <section className="notification-panel">
+      <SettingsSwitchRow
+        icon={<Bell size={22} />}
+        title="Notifications NEA KIDZ"
+        subtitle="Activer les rappels doux sur cet appareil"
+        checked={prefs.enabled}
+        onChange={(enabled) => update({
+          enabled,
+          newStoriesEnabled: enabled,
+          bedtimeEnabled: enabled ? prefs.bedtimeEnabled : false,
+        })}
+      />
+      <SettingsSwitchRow
+        icon={<Sparkles size={22} />}
+        title="Nouvelles histoires"
+        subtitle="Être prévenu quand une histoire arrive"
+        checked={prefs.enabled && prefs.newStoriesEnabled}
+        onChange={(newStoriesEnabled) => update({ enabled: newStoriesEnabled || prefs.enabled, newStoriesEnabled })}
+      />
+      <SettingsSwitchRow
+        icon={<Moon size={22} />}
+        title="Rappel du soir"
+        subtitle="Une invitation douce à lancer une histoire"
+        checked={prefs.enabled && prefs.bedtimeEnabled}
+        trailing={<button className="time-chip" type="button" onClick={() => update({ bedtimeTime: prefs.bedtimeTime === '20:30' ? '21:00' : '20:30' })}>{prefs.bedtimeTime}</button>}
+        onChange={(bedtimeEnabled) => update({ enabled: bedtimeEnabled || prefs.enabled, bedtimeEnabled })}
+      />
+    </section>
+  )
+}
+
+function SettingsSwitchRow({
+  icon,
+  title,
+  subtitle,
+  checked,
+  trailing,
+  onChange,
+}: {
+  icon: ReactNode
+  title: string
+  subtitle: string
+  checked: boolean
+  trailing?: ReactNode
+  onChange: (checked: boolean) => void
+}) {
+  return (
+    <div className={checked ? 'settings-switch-row active' : 'settings-switch-row'}>
+      <span>{icon}</span>
+      <div>
+        <strong>{title}</strong>
+        <small>{subtitle}</small>
+      </div>
+      {trailing}
+      <button className={checked ? 'switch-control active' : 'switch-control'} type="button" onClick={() => onChange(!checked)} aria-label={checked ? `Désactiver ${title}` : `Activer ${title}`}>
+        <i />
+      </button>
     </div>
   )
 }
