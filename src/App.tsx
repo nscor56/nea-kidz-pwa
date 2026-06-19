@@ -1560,6 +1560,7 @@ function App() {
   const duaAudioRef = useRef<HTMLAudioElement | null>(null)
   const streamCacheRef = useRef<Map<string, EpisodeStream>>(new Map())
   const streamRequestRef = useRef<Map<string, Promise<EpisodeStream>>>(new Map())
+  const playableAudioUrlCacheRef = useRef<Map<string, string>>(new Map())
   const lastHistorySaveRef = useRef(0)
   const listened60Ref = useRef(false)
   const onboardingStartedRef = useRef(false)
@@ -1918,6 +1919,23 @@ function App() {
     [apiFetch],
   )
 
+  const resolvePlayableAudioUrl = useCallback(async (url: string) => {
+    const source = mediaUrl(url)
+    const cached = playableAudioUrlCacheRef.current.get(source)
+    if (cached) return cached
+
+    if (!source.includes('/stream/')) {
+      playableAudioUrlCacheRef.current.set(source, source)
+      return source
+    }
+
+    const response = await fetch(source, { method: 'HEAD' })
+    if (!response.ok) throw new Error(`Audio source unavailable: ${response.status}`)
+    const resolved = response.url || source
+    playableAudioUrlCacheRef.current.set(source, resolved)
+    return resolved
+  }, [])
+
   useEffect(() => {
     if (!session?.token) {
       setHomeContent(null)
@@ -2115,6 +2133,18 @@ function App() {
     view,
   ])
 
+  useEffect(() => {
+    if (!session?.token || accountPending || onboardingRequired || view !== 'duas') return
+    const urls = new Set<string>()
+    duas.slice(0, 18).forEach((dua) => {
+      if (dua.audio_url_ar) urls.add(dua.audio_url_ar)
+    })
+    allahNames.slice(0, 18).forEach((name) => urls.add(`/stream/allah-names/${name.number}`))
+    urls.forEach((url) => {
+      void resolvePlayableAudioUrl(url).catch(() => undefined)
+    })
+  }, [accountPending, duas, onboardingRequired, resolvePlayableAudioUrl, session?.token, view])
+
   const openCollection = (collectionId: string) => {
     setSelectedCollectionId(collectionId)
     setView('collection')
@@ -2210,9 +2240,10 @@ function App() {
       if (!audio) return
       audio.muted = false
       audio.loop = false
+      const wasPrimed = audio.currentSrc === AUDIO_UNLOCK_SRC || audio.getAttribute('src') === AUDIO_UNLOCK_SRC
       if (audio.currentSrc !== stream.src && audio.getAttribute('src') !== stream.src) {
         audio.src = stream.src
-        audio.load()
+        if (!wasPrimed) audio.load()
       }
       audio.currentTime = 0
       void audio.play().then(() => {
@@ -2309,12 +2340,14 @@ function App() {
   const startDua = (dua: Dua, repeat = false) => {
     audioRef.current?.pause()
     setPlayer((current) => (current ? { ...current, playing: false } : null))
-    const src = mediaUrl(dua.audio_url_ar || `/stream/duas/${dua.id}/ar`)
+    const sourceUrl = dua.audio_url_ar || `/stream/duas/${dua.id}/ar`
+    const source = mediaUrl(sourceUrl)
+    const initialSrc = playableAudioUrlCacheRef.current.get(source) || source
     const audio = duaAudioRef.current
     setDuaAudio({
       dua,
-      src,
-      playing: Boolean(audio),
+      src: initialSrc,
+      playing: false,
       repeat,
       progress: 0,
       duration: 0,
@@ -2323,18 +2356,40 @@ function App() {
       setToast('Audio indisponible pour le moment.')
       return
     }
-    if (audio.currentSrc !== src && audio.getAttribute('src') !== src) {
-      audio.src = src
-      audio.load()
+
+    void primeAudioForGesture(audio)
+
+    const playResolvedSource = (src: string) => {
+      const wasPrimed = audio.currentSrc === AUDIO_UNLOCK_SRC || audio.getAttribute('src') === AUDIO_UNLOCK_SRC
+      audio.muted = false
+      audio.loop = repeat
+      if (audio.currentSrc !== src && audio.getAttribute('src') !== src) {
+        audio.src = src
+        if (!wasPrimed) audio.load()
+      }
+      audio.currentTime = 0
+      setDuaAudio((current) => (current?.dua.id === dua.id ? { ...current, src, repeat } : current))
+      void audio.play().then(() => {
+        setDuaAudio((current) => (current?.dua.id === dua.id ? { ...current, playing: true, repeat } : current))
+      }).catch(() => {
+        setDuaAudio((current) => (current?.dua.id === dua.id ? { ...current, playing: false, repeat } : current))
+        setToast('Audio indisponible pour le moment.')
+      })
     }
-    audio.loop = repeat
-    audio.currentTime = 0
-    void audio.play().then(() => {
-      setDuaAudio((current) => (current?.dua.id === dua.id ? { ...current, playing: true, repeat } : current))
-    }).catch(() => {
-      setDuaAudio((current) => (current?.dua.id === dua.id ? { ...current, playing: false, repeat } : current))
-      setToast('Audio invocation indisponible pour le moment.')
-    })
+
+    const cachedSrc = playableAudioUrlCacheRef.current.get(source)
+    if (cachedSrc) {
+      playResolvedSource(cachedSrc)
+      return
+    }
+
+    resolvePlayableAudioUrl(sourceUrl)
+      .then(playResolvedSource)
+      .catch(() => {
+        stopAudioPrime(audio)
+        setDuaAudio((current) => (current?.dua.id === dua.id ? { ...current, playing: false, repeat } : current))
+        setToast('Audio indisponible pour le moment.')
+      })
   }
 
   const toggleDuaPlayback = (dua: Dua) => {

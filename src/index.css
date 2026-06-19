@@ -3509,8 +3509,7 @@ p {
   top: 8px;
   z-index: 35;
   min-height: 68px;
-  display: grid;
-  grid-template-columns: 42px 44px 28px 1fr 28px 28px;
+  display: flex;
   gap: 8px;
   align-items: center;
   margin: 8px 18px 6px;
@@ -3536,12 +3535,14 @@ p {
 .mini-player-top img {
   width: 44px;
   height: 44px;
+  flex: 0 0 44px;
   border-radius: 14px;
 }
 
 .mini-round {
   width: 42px;
   height: 42px;
+  flex: 0 0 42px;
   border-radius: 999px;
   background: var(--gold-soft);
   color: var(--text);
@@ -3550,6 +3551,7 @@ p {
 .mini-icon {
   width: 28px;
   height: 38px;
+  flex: 0 0 28px;
   border-radius: 12px;
   background: transparent;
   color: var(--gold);
@@ -3557,6 +3559,7 @@ p {
 
 .mini-copy {
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .mini-copy strong,
@@ -3672,10 +3675,6 @@ p {
   .collection-hero > img {
     width: 104px;
     height: 104px;
-  }
-
-  .mini-player-top {
-    grid-template-columns: 40px 42px 1fr 28px 28px;
   }
 
   .mini-player-top .mini-icon:first-of-type {
