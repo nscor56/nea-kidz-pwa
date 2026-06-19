@@ -484,7 +484,7 @@ p {
   color: var(--gold);
 }
 
-.playlist-shortcut span,
+.playlist-shortcut span:not(.playlist-icon),
 .playlist-shortcut strong,
 .playlist-shortcut small {
   display: block;
